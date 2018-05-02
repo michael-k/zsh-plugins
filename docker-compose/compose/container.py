@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 from functools import reduce
 
 import six
+from docker.errors import ImageNotFound
 
 from .const import LABEL_CONTAINER_NUMBER
 from .const import LABEL_PROJECT
@@ -67,14 +68,16 @@ class Container(object):
         return self.dictionary['Name'][1:]
 
     @property
+    def project(self):
+        return self.labels.get(LABEL_PROJECT)
+
+    @property
     def service(self):
         return self.labels.get(LABEL_SERVICE)
 
     @property
     def name_without_project(self):
-        project = self.labels.get(LABEL_PROJECT)
-
-        if self.name.startswith('{0}_{1}'.format(project, self.service)):
+        if self.name.startswith('{0}_{1}'.format(self.project, self.service)):
             return '{0}_{1}'.format(self.service, self.number)
         else:
             return self.name
@@ -96,12 +99,16 @@ class Container(object):
     def human_readable_ports(self):
         def format_port(private, public):
             if not public:
-                return private
-            return '{HostIp}:{HostPort}->{private}'.format(
-                private=private, **public[0])
+                return [private]
+            return [
+                '{HostIp}:{HostPort}->{private}'.format(private=private, **pub)
+                for pub in public
+            ]
 
-        return ', '.join(format_port(*item)
-                         for item in sorted(six.iteritems(self.ports)))
+        return ', '.join(
+            ','.join(format_port(*item))
+            for item in sorted(six.iteritems(self.ports))
+        )
 
     @property
     def labels(self):
@@ -122,7 +129,7 @@ class Container(object):
         if self.is_restarting:
             return 'Restarting'
         if self.is_running:
-            return 'Ghost' if self.get('State.Ghost') else 'Up'
+            return 'Ghost' if self.get('State.Ghost') else self.human_readable_health_status
         else:
             return 'Exit %s' % self.get('State.ExitCode')
 
@@ -164,6 +171,18 @@ class Container(object):
     def has_api_logs(self):
         log_type = self.log_driver
         return not log_type or log_type in ('json-file', 'journald')
+
+    @property
+    def human_readable_health_status(self):
+        """ Generate UP status string with up time and health
+        """
+        status_string = 'Up'
+        container_status = self.get('State.Health.Status')
+        if container_status == 'starting':
+            status_string += ' (health: starting)'
+        elif container_status is not None:
+            status_string += ' (%s)' % container_status
+        return status_string
 
     def attach_log_stream(self):
         """A log stream can only be attached if the container uses a json-file
@@ -226,17 +245,17 @@ class Container(object):
         """Rename the container to a hopefully unique temporary container name
         by prepending the short id.
         """
-        self.client.rename(
-            self.id,
-            '%s_%s' % (self.short_id, self.name)
-        )
+        if not self.name.startswith(self.short_id):
+            self.client.rename(
+                self.id, '{0}_{1}'.format(self.short_id, self.name)
+            )
 
     def inspect_if_not_inspected(self):
         if not self.has_been_inspected:
             self.inspect()
 
     def wait(self):
-        return self.client.wait(self.id)
+        return self.client.wait(self.id).get('StatusCode', 127)
 
     def logs(self, *args, **kwargs):
         return self.client.logs(self.id, *args, **kwargs)
@@ -245,6 +264,21 @@ class Container(object):
         self.dictionary = self.client.inspect_container(self.id)
         self.has_been_inspected = True
         return self.dictionary
+
+    def image_exists(self):
+        try:
+            self.client.inspect_image(self.image)
+        except ImageNotFound:
+            return False
+
+        return True
+
+    def reset_image(self, img_id):
+        """ If this container's image has been removed, temporarily replace the old image ID
+            with `img_id`.
+        """
+        if not self.image_exists():
+            self.dictionary['Image'] = img_id
 
     def attach(self, *args, **kwargs):
         return self.client.attach(self.id, *args, **kwargs)

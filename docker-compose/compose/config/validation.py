@@ -15,6 +15,7 @@ from jsonschema import RefResolver
 from jsonschema import ValidationError
 
 from ..const import COMPOSEFILE_V1 as V1
+from ..const import NANOCPUS_SCALE
 from .errors import ConfigurationError
 from .errors import VERSION_EXPLANATION
 from .sort_services import get_service_name_from_network_mode
@@ -43,6 +44,31 @@ DOCKER_CONFIG_HINTS = {
 VALID_NAME_CHARS = '[a-zA-Z0-9\._\-]'
 VALID_EXPOSE_FORMAT = r'^\d+(\-\d+)?(\/[a-zA-Z]+)?$'
 
+VALID_IPV4_SEG = r'(\d{1,2}|1\d{2}|2[0-4]\d|25[0-5])'
+VALID_IPV4_ADDR = "({IPV4_SEG}\.){{3}}{IPV4_SEG}".format(IPV4_SEG=VALID_IPV4_SEG)
+VALID_REGEX_IPV4_CIDR = "^{IPV4_ADDR}/(\d|[1-2]\d|3[0-2])$".format(IPV4_ADDR=VALID_IPV4_ADDR)
+
+VALID_IPV6_SEG = r'[0-9a-fA-F]{1,4}'
+VALID_REGEX_IPV6_CIDR = "".join("""
+^
+(
+    (({IPV6_SEG}:){{7}}{IPV6_SEG})|
+    (({IPV6_SEG}:){{1,7}}:)|
+    (({IPV6_SEG}:){{1,6}}(:{IPV6_SEG}){{1,1}})|
+    (({IPV6_SEG}:){{1,5}}(:{IPV6_SEG}){{1,2}})|
+    (({IPV6_SEG}:){{1,4}}(:{IPV6_SEG}){{1,3}})|
+    (({IPV6_SEG}:){{1,3}}(:{IPV6_SEG}){{1,4}})|
+    (({IPV6_SEG}:){{1,2}}(:{IPV6_SEG}){{1,5}})|
+    (({IPV6_SEG}:){{1,1}}(:{IPV6_SEG}){{1,6}})|
+    (:((:{IPV6_SEG}){{1,7}}|:))|
+    (fe80:(:{IPV6_SEG}){{0,4}}%[0-9a-zA-Z]{{1,}})|
+    (::(ffff(:0{{1,4}}){{0,1}}:){{0,1}}{IPV4_ADDR})|
+    (({IPV6_SEG}:){{1,4}}:{IPV4_ADDR})
+)
+/(\d|[1-9]\d|1[0-1]\d|12[0-8])
+$
+""".format(IPV6_SEG=VALID_IPV6_SEG, IPV4_ADDR=VALID_IPV4_ADDR).split())
+
 
 @FormatChecker.cls_checks(format="ports", raises=ValidationError)
 def format_ports(instance):
@@ -59,6 +85,16 @@ def format_expose(instance):
         if not re.match(VALID_EXPOSE_FORMAT, instance):
             raise ValidationError(
                 "should be of the format 'PORT[/PROTOCOL]'")
+
+    return True
+
+
+@FormatChecker.cls_checks("subnet_ip_address", raises=ValidationError)
+def format_subnet_ip_address(instance):
+    if isinstance(instance, six.string_types):
+        if not re.match(VALID_REGEX_IPV4_CIDR, instance) and \
+                not re.match(VALID_REGEX_IPV6_CIDR, instance):
+            raise ValidationError("should use the CIDR format")
 
     return True
 
@@ -171,6 +207,21 @@ def validate_network_mode(service_config, service_names):
             "is undefined.".format(s=service_config, dep=dependency))
 
 
+def validate_pid_mode(service_config, service_names):
+    pid_mode = service_config.config.get('pid')
+    if not pid_mode:
+        return
+
+    dependency = get_service_name_from_network_mode(pid_mode)
+    if not dependency:
+        return
+    if dependency not in service_names:
+        raise ConfigurationError(
+            "Service '{s.name}' uses the PID namespace of service '{dep}' which "
+            "is undefined.".format(s=service_config, dep=dependency)
+        )
+
+
 def validate_links(service_config, service_names):
     for link in service_config.config.get('links', []):
         if link.split(':')[0] not in service_names:
@@ -211,14 +262,27 @@ def handle_error_for_schema_with_id(error, path):
 
     if is_service_dict_schema(schema_id) and error.validator == 'additionalProperties':
         return "Invalid service name '{}' - only {} characters are allowed".format(
-            # The service_name is the key to the json object
-            list(error.instance)[0],
-            VALID_NAME_CHARS)
+            # The service_name is one of the keys in the json object
+            [i for i in list(error.instance) if not i or any(filter(
+                lambda c: not re.match(VALID_NAME_CHARS, c), i
+            ))][0],
+            VALID_NAME_CHARS
+        )
 
     if error.validator == 'additionalProperties':
         if schema_id == '#/definitions/service':
             invalid_config_key = parse_key_from_error_msg(error)
             return get_unsupported_config_msg(path, invalid_config_key)
+
+        if schema_id.startswith('config_schema_v'):
+            invalid_config_key = parse_key_from_error_msg(error)
+            return ('Invalid top-level property "{key}". Valid top-level '
+                    'sections for this Compose file are: {properties}, and '
+                    'extensions starting with "x-".\n\n{explanation}').format(
+                key=invalid_config_key,
+                properties=', '.join(error.schema['properties'].keys()),
+                explanation=VERSION_EXPLANATION
+            )
 
         if not error.path:
             return '{}\n\n{}'.format(error.message, VERSION_EXPLANATION)
@@ -296,7 +360,6 @@ def _parse_oneof_validator(error):
     """
     types = []
     for context in error.context:
-
         if context.validator == 'oneOf':
             _, error_msg = _parse_oneof_validator(context)
             return path_string(context.path), error_msg
@@ -308,19 +371,19 @@ def _parse_oneof_validator(error):
             invalid_config_key = parse_key_from_error_msg(context)
             return (None, "contains unsupported option: '{}'".format(invalid_config_key))
 
+        if context.validator == 'uniqueItems':
+            return (
+                path_string(context.path) if context.path else None,
+                "contains non-unique items, please remove duplicates from {}".format(
+                    context.instance),
+            )
+
         if context.path:
             return (
                 path_string(context.path),
                 "contains {}, which is an invalid type, it should be {}".format(
                     json.dumps(context.instance),
                     _parse_valid_types_from_validator(context.validator_value)),
-            )
-
-        if context.validator == 'uniqueItems':
-            return (
-                None,
-                "contains non unique items, please remove duplicates from {}".format(
-                    context.instance),
             )
 
         if context.validator == 'type':
@@ -362,8 +425,8 @@ def process_config_schema_errors(error):
 
 
 def validate_against_config_schema(config_file):
-    schema = load_jsonschema(config_file.version)
-    format_checker = FormatChecker(["ports", "expose"])
+    schema = load_jsonschema(config_file)
+    format_checker = FormatChecker(["ports", "expose", "subnet_ip_address"])
     validator = Draft4Validator(
         schema,
         resolver=RefResolver(get_resolver_path(), schema),
@@ -374,23 +437,39 @@ def validate_against_config_schema(config_file):
         config_file.filename)
 
 
-def validate_service_constraints(config, service_name, version):
+def validate_service_constraints(config, service_name, config_file):
     def handler(errors):
-        return process_service_constraint_errors(errors, service_name, version)
+        return process_service_constraint_errors(
+            errors, service_name, config_file.version)
 
-    schema = load_jsonschema(version)
+    schema = load_jsonschema(config_file)
     validator = Draft4Validator(schema['definitions']['constraints']['service'])
     handle_errors(validator.iter_errors(config), handler, None)
+
+
+def validate_cpu(service_config):
+    cpus = service_config.config.get('cpus')
+    if not cpus:
+        return
+    nano_cpus = cpus * NANOCPUS_SCALE
+    if isinstance(nano_cpus, float) and not nano_cpus.is_integer():
+        raise ConfigurationError(
+            "cpus must have nine or less digits after decimal point")
 
 
 def get_schema_path():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def load_jsonschema(version):
+def load_jsonschema(config_file):
     filename = os.path.join(
         get_schema_path(),
-        "config_schema_v{0}.json".format(version))
+        "config_schema_v{0}.json".format(config_file.version))
+
+    if not os.path.exists(filename):
+        raise ConfigurationError(
+            'Version in "{}" is unsupported. {}'
+            .format(config_file.filename, VERSION_EXPLANATION))
 
     with open(filename, "r") as fh:
         return json.load(fh)
@@ -421,3 +500,27 @@ def handle_errors(errors, format_error_func, filename):
         "The Compose file{file_msg} is invalid because:\n{error_msg}".format(
             file_msg=" '{}'".format(filename) if filename else "",
             error_msg=error_msg))
+
+
+def validate_healthcheck(service_config):
+    healthcheck = service_config.config.get('healthcheck', {})
+
+    if 'test' in healthcheck and isinstance(healthcheck['test'], list):
+        if len(healthcheck['test']) == 0:
+            raise ConfigurationError(
+                'Service "{}" defines an invalid healthcheck: '
+                '"test" is an empty list'
+                .format(service_config.name))
+
+        # when disable is true config.py::process_healthcheck adds "test: ['NONE']" to service_config
+        elif healthcheck['test'][0] == 'NONE' and len(healthcheck) > 1:
+            raise ConfigurationError(
+                'Service "{}" defines an invalid healthcheck: '
+                '"disable: true" cannot be combined with other options'
+                .format(service_config.name))
+
+        elif healthcheck['test'][0] not in ('NONE', 'CMD', 'CMD-SHELL'):
+            raise ConfigurationError(
+                'Service "{}" defines an invalid healthcheck: '
+                'when "test" is a list the first item must be either NONE, CMD or CMD-SHELL'
+                .format(service_config.name))

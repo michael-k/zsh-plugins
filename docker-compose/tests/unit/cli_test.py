@@ -10,6 +10,7 @@ from io import StringIO
 import docker
 import py
 import pytest
+from docker.constants import DEFAULT_DOCKER_API_VERSION
 
 from .. import mock
 from .. import unittest
@@ -29,36 +30,36 @@ class CLITestCase(unittest.TestCase):
         test_dir = py._path.local.LocalPath('tests/fixtures/simple-composefile')
         with test_dir.as_cwd():
             project_name = get_project_name('.')
-            self.assertEquals('simplecomposefile', project_name)
+            assert 'simple-composefile' == project_name
 
     def test_project_name_with_explicit_base_dir(self):
         base_dir = 'tests/fixtures/simple-composefile'
         project_name = get_project_name(base_dir)
-        self.assertEquals('simplecomposefile', project_name)
+        assert 'simple-composefile' == project_name
 
     def test_project_name_with_explicit_uppercase_base_dir(self):
         base_dir = 'tests/fixtures/UpperCaseDir'
         project_name = get_project_name(base_dir)
-        self.assertEquals('uppercasedir', project_name)
+        assert 'uppercasedir' == project_name
 
     def test_project_name_with_explicit_project_name(self):
         name = 'explicit-project-name'
         project_name = get_project_name(None, project_name=name)
-        self.assertEquals('explicitprojectname', project_name)
+        assert 'explicit-project-name' == project_name
 
     @mock.patch.dict(os.environ)
     def test_project_name_from_environment_new_var(self):
         name = 'namefromenv'
         os.environ['COMPOSE_PROJECT_NAME'] = name
         project_name = get_project_name(None)
-        self.assertEquals(project_name, name)
+        assert project_name == name
 
     def test_project_name_with_empty_environment_var(self):
         base_dir = 'tests/fixtures/simple-composefile'
         with mock.patch.dict(os.environ):
             os.environ['COMPOSE_PROJECT_NAME'] = ''
             project_name = get_project_name(base_dir)
-        self.assertEquals('simplecomposefile', project_name)
+        assert 'simple-composefile' == project_name
 
     @mock.patch.dict(os.environ)
     def test_project_name_with_environment_file(self):
@@ -79,9 +80,9 @@ class CLITestCase(unittest.TestCase):
     def test_get_project(self):
         base_dir = 'tests/fixtures/longer-filename-composefile'
         project = get_project(base_dir)
-        self.assertEqual(project.name, 'longerfilenamecomposefile')
-        self.assertTrue(project.client)
-        self.assertTrue(project.services)
+        assert project.name == 'longer-filename-composefile'
+        assert project.client
+        assert project.services
 
     def test_command_help(self):
         with mock.patch('sys.stdout', new=StringIO()) as fake_stdout:
@@ -96,8 +97,12 @@ class CLITestCase(unittest.TestCase):
     @pytest.mark.xfail(IS_WINDOWS_PLATFORM, reason="requires dockerpty")
     @mock.patch('compose.cli.main.RunOperation', autospec=True)
     @mock.patch('compose.cli.main.PseudoTerminal', autospec=True)
+    @mock.patch.dict(os.environ)
     def test_run_interactive_passes_logs_false(self, mock_pseudo_terminal, mock_run_operation):
+        os.environ['COMPOSE_INTERACTIVE_NO_CLI'] = 'true'
         mock_client = mock.create_autospec(docker.APIClient)
+        mock_client.api_version = DEFAULT_DOCKER_API_VERSION
+        mock_client._general_configs = {}
         project = Project.from_config(
             name='composetest',
             client=mock_client,
@@ -112,13 +117,16 @@ class CLITestCase(unittest.TestCase):
                 'SERVICE': 'service',
                 'COMMAND': None,
                 '-e': [],
+                '--label': [],
                 '--user': None,
                 '--no-deps': None,
-                '-d': False,
+                '--detach': False,
                 '-T': None,
                 '--entrypoint': None,
                 '--service-ports': None,
+                '--use-aliases': None,
                 '--publish': [],
+                '--volume': [],
                 '--rm': None,
                 '--name': None,
                 '--workdir': None,
@@ -129,6 +137,8 @@ class CLITestCase(unittest.TestCase):
 
     def test_run_service_with_restart_always(self):
         mock_client = mock.create_autospec(docker.APIClient)
+        mock_client.api_version = DEFAULT_DOCKER_API_VERSION
+        mock_client._general_configs = {}
 
         project = Project.from_config(
             name='composetest',
@@ -146,45 +156,46 @@ class CLITestCase(unittest.TestCase):
             'SERVICE': 'service',
             'COMMAND': None,
             '-e': [],
+            '--label': [],
             '--user': None,
             '--no-deps': None,
-            '-d': True,
+            '--detach': True,
             '-T': None,
             '--entrypoint': None,
             '--service-ports': None,
+            '--use-aliases': None,
             '--publish': [],
+            '--volume': [],
             '--rm': None,
             '--name': None,
             '--workdir': None,
         })
 
-        self.assertEquals(
-            mock_client.create_host_config.call_args[1]['restart_policy']['Name'],
-            'always'
-        )
+        assert mock_client.create_host_config.call_args[1]['restart_policy']['Name'] == 'always'
 
         command = TopLevelCommand(project)
         command.run({
             'SERVICE': 'service',
             'COMMAND': None,
             '-e': [],
+            '--label': [],
             '--user': None,
             '--no-deps': None,
-            '-d': True,
+            '--detach': True,
             '-T': None,
             '--entrypoint': None,
             '--service-ports': None,
+            '--use-aliases': None,
             '--publish': [],
+            '--volume': [],
             '--rm': True,
             '--name': None,
             '--workdir': None,
         })
 
-        self.assertFalse(
-            mock_client.create_host_config.call_args[1].get('restart_policy')
-        )
+        assert not mock_client.create_host_config.call_args[1].get('restart_policy')
 
-    def test_command_manula_and_service_ports_together(self):
+    def test_command_manual_and_service_ports_together(self):
         project = Project.from_config(
             name='composetest',
             client=None,
@@ -194,17 +205,19 @@ class CLITestCase(unittest.TestCase):
         )
         command = TopLevelCommand(project)
 
-        with self.assertRaises(UserError):
+        with pytest.raises(UserError):
             command.run({
                 'SERVICE': 'service',
                 'COMMAND': None,
                 '-e': [],
+                '--label': [],
                 '--user': None,
                 '--no-deps': None,
-                '-d': True,
+                '--detach': True,
                 '-T': None,
                 '--entrypoint': None,
                 '--service-ports': True,
+                '--use-aliases': None,
                 '--publish': ['80:80'],
                 '--rm': None,
                 '--name': None,

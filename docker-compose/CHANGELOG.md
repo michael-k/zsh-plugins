@@ -1,6 +1,755 @@
 Change log
 ==========
 
+1.21.1 (2018-04-27)
+-------------------
+
+### Bugfixes
+
+- In 1.21.0, we introduced a change to how project names are sanitized for
+  internal use in resource names. This caused issues when manipulating an
+  existing, deployed application whose name had changed as a result.
+  This release properly detects resources using "legacy" naming conventions.
+
+- Fixed an issue where specifying an in-context Dockerfile using an absolute
+  path would fail despite being valid.
+
+- Fixed a bug where IPAM option changes were incorrectly detected, preventing
+  redeployments.
+
+- Validation of v2 files now properly checks the structure of IPAM configs.
+
+- Improved support for credentials stores on Windows to include binaries using
+  extensions other than `.exe`. The list of valid extensions is determined by
+  the contents of the `PATHEXT` environment variable.
+
+- Fixed a bug where Compose would generate invalid binds containing duplicate
+  elements with some v3.2 files, triggering errors at the Engine level during
+  deployment.
+
+1.21.0 (2018-04-10)
+-------------------
+
+### New features
+
+#### Compose file version 2.4
+
+- Introduced version 2.4 of the `docker-compose.yml` specification.
+  This version requires Docker Engine 17.12.0 or above.
+
+- Added support for the `platform` parameter in service definitions.
+  If supplied, the parameter is also used when performing build for the
+  service.
+
+#### Compose file version 2.2 and up
+
+- Added support for the `cpu_rt_period` and `cpu_rt_runtime` parameters
+  in service definitions (2.x only).
+
+#### Compose file version 2.1 and up
+
+- Added support for the `cpu_period` parameter in service definitions
+  (2.x only).
+
+- Added support for the `isolation` parameter in service build configurations.
+  Additionally, the `isolation` parameter is used for builds as well if no
+  `build.isolation` parameter is defined. (2.x only)
+
+#### All formats
+
+- Added support for the `--workdir` flag in `docker-compose exec`.
+
+- Added support for the `--compress` flag in `docker-compose build`.
+
+- `docker-compose pull` is now performed in parallel by default. You can
+  opt out using the `--no-parallel` flag. The `--parallel` flag is now
+  deprecated and will be removed in a future version.
+
+- Dashes and underscores in project names are no longer stripped out.
+
+- `docker-compose build` now supports the use of Dockerfile from outside
+  the build context.
+
+### Bugfixes
+
+- Compose now checks that the volume's configuration matches the remote
+  volume, and errors out if a mismatch is detected.
+
+- Fixed a bug that caused Compose to raise unexpected errors when attempting
+  to create several one-off containers in parallel.
+
+- Fixed a bug with argument parsing when using `docker-machine config` to
+  generate TLS flags for `exec` and `run` commands.
+
+- Fixed a bug where variable substitution with an empty default value
+  (e.g. `${VAR:-}`) would print an incorrect warning.
+
+- Improved resilience when encoding of the Compose file doesn't match the
+  system's. Users are encouraged to use UTF-8 when possible.
+
+- Fixed a bug where external overlay networks in Swarm would be incorrectly
+  recognized as inexistent by Compose, interrupting otherwise valid
+  operations.
+
+1.20.1 (2018-03-21)
+-------------------
+
+### Bugfixes
+
+- Fixed an issue where `docker-compose build` would error out if the
+  build context contained directory symlinks
+
+1.20.0 (2018-03-20)
+-------------------
+
+### New features
+
+#### Compose file version 3.6
+
+- Introduced version 3.6 of the `docker-compose.yml` specification.
+  This version requires Docker Engine 18.02.0 or above.
+
+- Added support for the `tmpfs.size` property in volume mappings
+
+#### Compose file version 3.2 and up
+
+- The `--build-arg` option can now be used without specifying a service
+  in `docker-compose build`
+
+#### Compose file version 2.3
+
+- Added support for `device_cgroup_rules` in service definitions
+
+- Added support for the `tmpfs.size` property in long-form volume mappings
+
+- The `--build-arg` option can now be used without specifying a service
+  in `docker-compose build`
+
+#### All formats
+
+- Added a `--log-level` option to the top-level `docker-compose` command.
+  Accepted values are `debug`, `info`, `warning`, `error`, `critical`.
+  Default log level is `info`
+
+- `docker-compose run` now allows users to unset the container's entrypoint
+
+- Proxy configuration found in the `~/.docker/config.json` file now populates
+  environment and build args for containers created by Compose
+
+- Added the `--use-aliases` flag to `docker-compose run`, indicating that
+  network aliases declared in the service's config should be used for the
+  running container
+
+- Added the `--include-deps` flag to `docker-compose pull`
+
+- `docker-compose run` now kills and removes the running container upon
+  receiving `SIGHUP`
+
+- `docker-compose ps` now shows the containers' health status if available
+
+- Added the long-form `--detach` option to the `exec`, `run` and `up`
+  commands
+
+### Bugfixes
+
+- Fixed `.dockerignore` handling, notably with regard to absolute paths
+  and last-line precedence rules
+
+- Fixed an issue where Compose would make costly DNS lookups when connecting
+  to the Engine when using Docker For Mac
+
+- Fixed a bug introduced in 1.19.0 which caused the default certificate path
+  to not be honored by Compose
+
+- Fixed a bug where Compose would incorrectly check whether a symlink's
+  destination was accessible when part of a build context
+
+- Fixed a bug where `.dockerignore` files containing lines of whitespace
+  caused Compose to error out on Windows
+
+- Fixed a bug where `--tls*` and `--host` options wouldn't be properly honored
+  for interactive `run` and `exec` commands
+
+- A `seccomp:<filepath>` entry in the `security_opt` config now correctly
+  sends the contents of the file to the engine
+
+- ANSI output for `up` and `down` operations should no longer affect the wrong
+  lines
+
+- Improved support for non-unicode locales
+
+- Fixed a crash occurring on Windows when the user's home directory name
+  contained non-ASCII characters
+
+- Fixed a bug occurring during builds caused by files with a negative `mtime`
+  values in the build context
+
+- Fixed an encoding bug when streaming build progress
+
+1.19.0 (2018-02-07)
+-------------------
+
+### Breaking changes
+
+- On UNIX platforms, interactive `run` and `exec` commands now require
+  the `docker` CLI to be installed on the client by default. To revert
+  to the previous behavior, users may set the `COMPOSE_INTERACTIVE_NO_CLI`
+  environment variable.
+
+### New features
+
+#### Compose file version 3.x
+
+- The output of the `config` command should now merge `deploy` options from
+  several Compose files in a more accurate manner
+
+#### Compose file version 2.3
+
+- Added support for the `runtime` option in service definitions
+
+#### Compose file version 2.1 and up
+
+- Added support for the `${VAR:?err}` and `${VAR?err}` variable interpolation
+  syntax to indicate mandatory variables
+
+#### Compose file version 2.x
+
+- Added `priority` key to service network mappings, allowing the user to
+  define in which order the specified service will connect to each network
+
+#### All formats
+
+- Added `--renew-anon-volumes` (shorthand `-V`) to the `up` command,
+  preventing Compose from recovering volume data from previous containers for
+  anonymous volumes
+
+- Added limit for number of simulatenous parallel operations, which should
+  prevent accidental resource exhaustion of the server. Default is 64 and
+  can be configured using the `COMPOSE_PARALLEL_LIMIT` environment variable
+
+- Added `--always-recreate-deps` flag to the `up` command to force recreating
+  dependent services along with the dependency owner
+
+- Added `COMPOSE_IGNORE_ORPHANS` environment variable to forgo orphan
+  container detection and suppress warnings
+
+- Added `COMPOSE_FORCE_WINDOWS_HOST` environment variable to force Compose
+  to parse volume definitions as if the Docker host was a Windows system,
+  even if Compose itself is currently running on UNIX
+
+- Bash completion should now be able to better differentiate between running,
+  stopped and paused services
+
+### Bugfixes
+
+- Fixed a bug that would cause the `build` command to report a connection
+  error when the build context contained unreadable files or FIFO objects.
+  These file types will now be handled appropriately
+
+- Fixed various issues around interactive `run`/`exec` sessions.
+
+- Fixed a bug where setting TLS options with environment and CLI flags
+  simultaneously would result in part of the configuration being ignored
+
+- Fixed a bug where the DOCKER_TLS_VERIFY environment variable was being
+  ignored by Compose
+
+- Fixed a bug where the `-d` and `--timeout` flags in `up` were erroneously
+  marked as incompatible
+
+- Fixed a bug where the recreation of a service would break if the image
+  associated with the previous container had been removed
+
+- Fixed a bug where updating a mount's target would break Compose when
+  trying to recreate the associated service
+
+- Fixed a bug where `tmpfs` volumes declared using the extended syntax in
+  Compose files using version 3.2 would be erroneously created as anonymous
+  volumes instead
+
+- Fixed a bug where type conversion errors would print a stacktrace instead
+  of exiting gracefully
+
+- Fixed some errors related to unicode handling
+
+- Dependent services no longer get recreated along with the dependency owner
+  if their configuration hasn't changed
+
+- Added better validation of `labels` fields in Compose files. Label values
+  containing scalar types (number, boolean) now get automatically converted
+  to strings
+
+1.18.0 (2017-12-15)
+-------------------
+
+### New features
+
+#### Compose file version 3.5
+
+- Introduced version 3.5 of the `docker-compose.yml` specification.
+  This version requires Docker Engine 17.06.0 or above
+
+- Added support for the `shm_size` parameter in build configurations
+
+- Added support for the `isolation` parameter in service definitions
+
+- Added support for custom names for network, secret and config definitions
+
+#### Compose file version 2.3
+
+- Added support for `extra_hosts` in build configuration
+
+- Added support for the [long syntax](https://docs.docker.com/compose/compose-file/#long-syntax-3) for volume entries, as previously introduced in the 3.2 format.
+  Note that using this syntax will create [mounts](https://docs.docker.com/engine/admin/volumes/bind-mounts/) instead of volumes.
+
+#### Compose file version 2.1 and up
+
+- Added support for the `oom_kill_disable` parameter in service definitions
+  (2.x only)
+
+- Added support for custom names for network definitions (2.x only)
+
+
+#### All formats
+
+- Values interpolated from the environment will now be converted to the
+  proper type when used in non-string fields.
+
+- Added support for `--label` in `docker-compose run`
+
+- Added support for `--timeout` in `docker-compose down`
+
+- Added support for `--memory` in `docker-compose build`
+
+- Setting `stop_grace_period` in service definitions now also sets the
+  container's `stop_timeout`
+
+### Bugfixes
+
+- Fixed an issue where Compose was still handling service hostname according
+  to legacy engine behavior, causing hostnames containing dots to be cut up
+
+- Fixed a bug where the `X-Y:Z` syntax for ports was considered invalid
+  by Compose
+
+- Fixed an issue with CLI logging causing duplicate messages and inelegant
+  output to occur
+
+- Fixed an issue that caused `stop_grace_period` to be ignored when using
+  multiple Compose files
+
+- Fixed a bug that caused `docker-compose images` to crash when using
+  untagged images
+
+- Fixed a bug where the valid `${VAR:-}` syntax would cause Compose to
+  error out
+
+- Fixed a bug where `env_file` entries using an UTF-8 BOM were being read
+  incorrectly
+
+- Fixed a bug where missing secret files would generate an empty directory
+  in their place
+
+- Fixed character encoding issues in the CLI's error handlers
+
+- Added validation for the `test` field in healthchecks
+
+- Added validation for the `subnet` field in IPAM configurations
+
+- Added validation for `volumes` properties when using the long syntax in
+  service definitions
+
+- The CLI now explicit prevents using `-d` and `--timeout` together
+  in `docker-compose up`
+
+1.17.1 (2017-11-08)
+------------------
+
+### Bugfixes
+
+- Fixed a bug that would prevent creating new containers when using
+  container labels in the list format as part of the service's definition.
+
+1.17.0 (2017-11-02)
+-------------------
+
+### New features
+
+#### Compose file version 3.4
+
+- Introduced version 3.4 of the `docker-compose.yml` specification.
+  This version requires to be used with Docker Engine 17.06.0 or above.
+
+- Added support for `cache_from`, `network` and `target` options in build
+  configurations
+
+- Added support for the `order` parameter in the `update_config` section
+
+- Added support for setting a custom name in volume definitions using
+  the `name` parameter
+
+#### Compose file version 2.3
+
+- Added support for `shm_size` option in build configuration
+
+#### Compose file version 2.x
+
+- Added support for extension fields (`x-*`). Also available for v3.4 files
+
+#### All formats
+
+- Added new `--no-start` to the `up` command, allowing users to create all
+  resources (networks, volumes, containers) without starting services.
+  The `create` command is deprecated in favor of this new option
+
+### Bugfixes
+
+- Fixed a bug where `extra_hosts` values would be overridden by extension
+  files instead of merging together
+
+- Fixed a bug where the validation for v3.2 files would prevent using the
+  `consistency` field in service volume definitions
+
+- Fixed a bug that would cause a crash when configuration fields expecting
+  unique items would contain duplicates
+
+- Fixed a bug where mount overrides with a different mode would create a
+  duplicate entry instead of overriding the original entry
+
+- Fixed a bug where build labels declared as a list wouldn't be properly
+  parsed
+
+- Fixed a bug where the output of `docker-compose config` would be invalid
+  for some versions if the file contained custom-named external volumes
+
+- Improved error handling when issuing a build command on Windows using an
+  unsupported file version
+
+- Fixed an issue where networks with identical names would sometimes be
+  created when running `up` commands concurrently.
+
+1.16.1 (2017-09-01)
+-------------------
+
+### Bugfixes
+
+- Fixed bug that prevented using `extra_hosts` in several configuration files.
+
+1.16.0 (2017-08-31)
+-------------------
+
+### New features
+
+#### Compose file version 2.3
+
+- Introduced version 2.3 of the `docker-compose.yml` specification.
+  This version requires to be used with Docker Engine 17.06.0 or above.
+
+- Added support for the `target` parameter in build configurations
+
+- Added support for the `start_period` parameter in healthcheck
+  configurations
+
+#### Compose file version 2.x
+
+- Added support for the `blkio_config` parameter in service definitions
+
+- Added support for setting a custom name in volume definitions using
+  the `name` parameter (not available for version 2.0)
+
+#### All formats
+
+- Added new CLI flag `--no-ansi` to suppress ANSI control characters in
+  output
+
+### Bugfixes
+
+- Fixed a bug where nested `extends` instructions weren't resolved
+  properly, causing "file not found" errors
+
+- Fixed several issues with `.dockerignore` parsing
+
+- Fixed issues where logs of TTY-enabled services were being printed
+  incorrectly and causing `MemoryError` exceptions
+
+- Fixed a bug where printing application logs would sometimes be interrupted
+  by a `UnicodeEncodeError` exception on Python 3
+
+- The `$` character in the output of `docker-compose config` is now
+  properly escaped
+
+- Fixed a bug where running `docker-compose top` would sometimes fail
+  with an uncaught exception
+
+- Fixed a bug where `docker-compose pull` with the `--parallel` flag
+  would return a `0` exit code when failing
+
+- Fixed an issue where keys in `deploy.resources` were not being validated
+
+- Fixed an issue where the `logging` options in the output of
+  `docker-compose config` would be set to `null`, an invalid value
+
+- Fixed the output of the `docker-compose images` command when an image
+  would come from a private repository using an explicit port number
+
+- Fixed the output of `docker-compose config` when a port definition used
+  `0` as the value for the published port
+
+1.15.0 (2017-07-26)
+-------------------
+
+### New features
+
+#### Compose file version 2.2
+
+- Added support for the `network` parameter in build configurations.
+
+#### Compose file version 2.1 and up
+
+- The `pid` option in a service's definition now supports a `service:<name>`
+  value.
+
+- Added support for the `storage_opt` parameter in in service definitions.
+  This option is not available for the v3 format
+
+#### All formats
+
+- Added `--quiet` flag to `docker-compose pull`, suppressing progress output
+
+- Some improvements to CLI output
+
+### Bugfixes
+
+- Volumes specified through the `--volume` flag of `docker-compose run` now
+  complement volumes declared in the service's defintion instead of replacing
+  them
+
+- Fixed a bug where using multiple Compose files would unset the scale value
+  defined inside the Compose file.
+
+- Fixed an issue where the `credHelpers` entries in the `config.json` file
+  were not being honored by Compose
+
+- Fixed a bug where using multiple Compose files with port declarations
+  would cause failures in Python 3 environments
+
+- Fixed a bug where some proxy-related options present in the user's
+  environment would prevent Compose from running
+
+- Fixed an issue where the output of `docker-compose config` would be invalid
+  if the original file used `Y` or `N` values
+
+- Fixed an issue preventing `up` operations on a previously created stack on
+  Windows Engine.
+
+1.14.0 (2017-06-19)
+-------------------
+
+### New features
+
+#### Compose file version 3.3
+
+- Introduced version 3.3 of the `docker-compose.yml` specification.
+  This version requires to be used with Docker Engine 17.06.0 or above.
+  Note: the `credential_spec` and `configs` keys only apply to Swarm services
+  and will be ignored by Compose
+
+#### Compose file version 2.2
+
+- Added the following parameters in service definitions: `cpu_count`,
+  `cpu_percent`, `cpus`
+
+#### Compose file version 2.1
+
+- Added support for build labels. This feature is also available in the
+  2.2 and 3.3 formats.
+
+#### All formats
+
+- Added shorthand `-u` for `--user` flag in `docker-compose exec`
+
+- Differences in labels between the Compose file and remote network
+  will now print a warning instead of preventing redeployment.
+
+### Bugfixes
+
+- Fixed a bug where service's dependencies were being rescaled to their
+  default scale when running a `docker-compose run` command
+
+- Fixed a bug where `docker-compose rm` with the `--stop` flag was not
+  behaving properly when provided with a list of services to remove
+
+- Fixed a bug where `cache_from` in the build section would be ignored when
+  using more than one Compose file.
+
+- Fixed a bug that prevented binding the same port to different IPs when
+  using more than one Compose file.
+
+- Fixed a bug where override files would not be picked up by Compose if they
+  had the `.yaml` extension
+
+- Fixed a bug on Windows Engine where networks would be incorrectly flagged
+  for recreation
+
+- Fixed a bug where services declaring ports would cause crashes on some
+  versions of Python 3
+
+- Fixed a bug where the output of `docker-compose config` would sometimes
+  contain invalid port definitions
+
+1.13.0 (2017-05-02)
+-------------------
+
+### Breaking changes
+
+- `docker-compose up` now resets a service's scaling to its default value.
+  You can use the newly introduced `--scale` option to specify a custom
+  scale value
+
+### New features
+
+#### Compose file version 2.2
+
+- Introduced version 2.2 of the `docker-compose.yml` specification. This
+  version requires to be used with Docker Engine 1.13.0 or above
+
+- Added support for `init` in service definitions.
+
+- Added support for `scale` in service definitions. The configuration's value
+  can be overridden using the `--scale` flag in `docker-compose up`.
+  Please note that the `scale` command is disabled for this file format
+
+#### Compose file version 2.x
+
+- Added support for `options` in the `ipam` section of network definitions
+
+### Bugfixes
+
+- Fixed a bug where paths provided to compose via the `-f` option were not
+  being resolved properly
+
+- Fixed a bug where the `ext_ip::target_port` notation in the ports section
+  was incorrectly marked as invalid
+
+- Fixed an issue where the `exec` command would sometimes not return control
+  to the terminal when using the `-d` flag
+
+- Fixed a bug where secrets were missing from the output of the `config`
+  command for v3.2 files
+
+- Fixed an issue where `docker-compose` would hang if no internet connection
+  was available
+
+- Fixed an issue where paths containing unicode characters passed via the `-f`
+  flag were causing Compose to crash
+
+- Fixed an issue where the output of `docker-compose config` would be invalid
+  if the Compose file contained external secrets
+
+- Fixed a bug where using `--exit-code-from` with `up` would fail if Compose
+  was installed in a Python 3 environment
+
+- Fixed a bug where recreating containers using a combination of `tmpfs` and
+  `volumes` would result in an invalid config state
+
+
+1.12.0 (2017-04-04)
+-------------------
+
+### New features
+
+#### Compose file version 3.2
+
+- Introduced version 3.2 of the `docker-compose.yml` specification
+
+- Added support for `cache_from` in the `build` section of services
+
+- Added support for the new expanded ports syntax in service definitions
+
+- Added support for the new expanded volumes syntax in service definitions
+
+#### Compose file version 2.1
+
+- Added support for `pids_limit` in service definitions
+
+#### Compose file version 2.0 and up
+
+- Added `--volumes` option to `docker-compose config` that lists named
+  volumes declared for that project
+
+- Added support for `mem_reservation` in service definitions (2.x only)
+
+- Added support for `dns_opt` in service definitions (2.x only)
+
+#### All formats
+
+- Added a new `docker-compose images` command that lists images used by
+  the current project's containers
+
+- Added a `--stop` (shorthand `-s`) option to `docker-compose rm` that stops
+  the running containers before removing them
+
+- Added a `--resolve-image-digests` option to `docker-compose config` that
+  pins the image version for each service to a permanent digest
+
+- Added a `--exit-code-from SERVICE` option to `docker-compose up`. When
+  used, `docker-compose` will exit on any container's exit with the code
+  corresponding to the specified service's exit code
+
+- Added a `--parallel` option to `docker-compose pull` that enables images
+  for multiple services to be pulled simultaneously
+
+- Added a `--build-arg` option to `docker-compose build`
+
+- Added a `--volume <volume_mapping>` (shorthand `-v`) option to
+  `docker-compose run` to declare runtime volumes to be mounted
+
+- Added a `--project-directory PATH` option to `docker-compose` that will
+  affect path resolution for the project
+
+- When using `--abort-on-container-exit` in `docker-compose up`, the exit
+  code for the container that caused the abort will be the exit code of
+  the `docker-compose up` command
+
+- Users can now configure which path separator character they want to use
+  to separate the `COMPOSE_FILE` environment value using the
+  `COMPOSE_PATH_SEPARATOR` environment variable
+
+- Added support for port range to single port in port mappings
+  (e.g. `8000-8010:80`)
+
+### Bugfixes
+
+- `docker-compose run --rm` now removes anonymous volumes after execution,
+  matching the behavior of `docker run --rm`.
+
+- Fixed a bug where override files containing port lists would cause a
+  TypeError to be raised
+
+- Fixed a bug where the `deploy` key would be missing from the output of
+  `docker-compose config`
+
+- Fixed a bug where scaling services up or down would sometimes re-use
+  obsolete containers
+
+- Fixed a bug where the output of `docker-compose config` would be invalid
+  if the project declared anonymous volumes
+
+- Variable interpolation now properly occurs in the `secrets` section of
+  the Compose file
+
+- The `secrets` section now properly appears in the output of
+  `docker-compose config`
+
+- Fixed a bug where changes to some networks properties would not be
+  detected against previously created networks
+
+- Fixed a bug where `docker-compose` would crash when trying to write into
+  a closed pipe
+
+- Fixed an issue where Compose would not pick up on the value of
+  COMPOSE_TLS_VERSION when used in combination with command-line TLS flags
+
 1.11.2 (2017-02-17)
 -------------------
 
@@ -649,7 +1398,7 @@ Bug Fixes:
     if at least one container is using the network.
 
 -   When printings logs during `up` or `logs`, flush the output buffer after
-    each line to prevent buffering issues from hideing logs.
+    each line to prevent buffering issues from hiding logs.
 
 -   Recreate a container if one of its dependencies is being created.
     Previously a container was only recreated if it's dependencies already

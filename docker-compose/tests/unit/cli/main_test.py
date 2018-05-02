@@ -3,14 +3,17 @@ from __future__ import unicode_literals
 
 import logging
 
+import docker
 import pytest
 
 from compose import container
 from compose.cli.errors import UserError
 from compose.cli.formatter import ConsoleWarningFormatter
+from compose.cli.main import call_docker
 from compose.cli.main import convergence_strategy_from_opts
 from compose.cli.main import filter_containers_to_service_names
 from compose.cli.main import setup_console_handler
+from compose.cli.main import warn_for_swarm_mode
 from compose.service import ConvergenceStrategy
 from tests import mock
 
@@ -53,6 +56,14 @@ class TestCLIMainTestCase(object):
         service_names = []
         actual = filter_containers_to_service_names(containers, service_names)
         assert actual == containers
+
+    def test_warning_in_swarm_mode(self):
+        mock_client = mock.create_autospec(docker.APIClient)
+        mock_client.info.return_value = {'Swarm': {'LocalNodeState': 'active'}}
+
+        with mock.patch('compose.cli.main.log') as fake_log:
+            warn_for_swarm_mode(mock_client)
+            assert fake_log.warn.call_count == 1
 
 
 class TestSetupConsoleHandlerTestCase(object):
@@ -102,3 +113,52 @@ class TestConvergeStrategyFromOptsTestCase(object):
             convergence_strategy_from_opts(options) ==
             ConvergenceStrategy.changed
         )
+
+
+def mock_find_executable(exe):
+    return exe
+
+
+@mock.patch('compose.cli.main.find_executable', mock_find_executable)
+class TestCallDocker(object):
+    def test_simple_no_options(self):
+        with mock.patch('subprocess.call') as fake_call:
+            call_docker(['ps'], {})
+
+        assert fake_call.call_args[0][0] == ['docker', 'ps']
+
+    def test_simple_tls_option(self):
+        with mock.patch('subprocess.call') as fake_call:
+            call_docker(['ps'], {'--tls': True})
+
+        assert fake_call.call_args[0][0] == ['docker', '--tls', 'ps']
+
+    def test_advanced_tls_options(self):
+        with mock.patch('subprocess.call') as fake_call:
+            call_docker(['ps'], {
+                '--tls': True,
+                '--tlscacert': './ca.pem',
+                '--tlscert': './cert.pem',
+                '--tlskey': './key.pem',
+            })
+
+        assert fake_call.call_args[0][0] == [
+            'docker', '--tls', '--tlscacert', './ca.pem', '--tlscert',
+            './cert.pem', '--tlskey', './key.pem', 'ps'
+        ]
+
+    def test_with_host_option(self):
+        with mock.patch('subprocess.call') as fake_call:
+            call_docker(['ps'], {'--host': 'tcp://mydocker.net:2333'})
+
+        assert fake_call.call_args[0][0] == [
+            'docker', '--host', 'tcp://mydocker.net:2333', 'ps'
+        ]
+
+    def test_with_host_option_shorthand_equal(self):
+        with mock.patch('subprocess.call') as fake_call:
+            call_docker(['ps'], {'--host': '=tcp://mydocker.net:2333'})
+
+        assert fake_call.call_args[0][0] == [
+            'docker', '--host', 'tcp://mydocker.net:2333', 'ps'
+        ]

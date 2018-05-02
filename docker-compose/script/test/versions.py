@@ -37,14 +37,22 @@ import requests
 GITHUB_API = 'https://api.github.com/repos'
 
 
-class Version(namedtuple('_Version', 'major minor patch rc')):
+class Version(namedtuple('_Version', 'major minor patch rc edition')):
 
     @classmethod
     def parse(cls, version):
+        edition = None
         version = version.lstrip('v')
         version, _, rc = version.partition('-')
+        if rc:
+            if 'rc' not in rc:
+                edition = rc
+                rc = None
+            elif '-' in rc:
+                edition, rc = rc.split('-')
+
         major, minor, patch = version.split('.', 3)
-        return cls(int(major), int(minor), int(patch), rc)
+        return cls(major, minor, patch, rc, edition)
 
     @property
     def major_minor(self):
@@ -57,11 +65,17 @@ class Version(namedtuple('_Version', 'major minor patch rc')):
         """
         # rc releases should appear before official releases
         rc = (0, self.rc) if self.rc else (1, )
-        return (self.major, self.minor, self.patch) + rc
+        return (int(self.major), int(self.minor), int(self.patch)) + rc
 
     def __str__(self):
         rc = '-{}'.format(self.rc) if self.rc else ''
-        return '.'.join(map(str, self[:3])) + rc
+        edition = '-{}'.format(self.edition) if self.edition else ''
+        return '.'.join(map(str, self[:3])) + edition + rc
+
+
+BLACKLIST = [  # List of versions known to be broken and should not be used
+    Version.parse('18.03.0-ce-rc2'),
+]
 
 
 def group_versions(versions):
@@ -94,6 +108,7 @@ def get_latest_versions(versions, num=1):
     group.
     """
     versions = group_versions(versions)
+    num = min(len(versions), num)
     return [versions[index][0] for index in range(num)]
 
 
@@ -107,21 +122,25 @@ def get_default(versions):
 def get_versions(tags):
     for tag in tags:
         try:
-            yield Version.parse(tag['name'])
+            v = Version.parse(tag['name'])
+            if v not in BLACKLIST:
+                yield v
         except ValueError:
             print("Skipping invalid tag: {name}".format(**tag), file=sys.stderr)
 
 
-def get_github_releases(project):
+def get_github_releases(projects):
     """Query the Github API for a list of version tags and return them in
     sorted order.
 
     See https://developer.github.com/v3/repos/#list-tags
     """
-    url = '{}/{}/tags'.format(GITHUB_API, project)
-    response = requests.get(url)
-    response.raise_for_status()
-    versions = get_versions(response.json())
+    versions = []
+    for project in projects:
+        url = '{}/{}/tags'.format(GITHUB_API, project)
+        response = requests.get(url)
+        response.raise_for_status()
+        versions.extend(get_versions(response.json()))
     return sorted(versions, reverse=True, key=operator.attrgetter('order'))
 
 
@@ -136,7 +155,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv)
-    versions = get_github_releases(args.project)
+    versions = get_github_releases(args.project.split(','))
 
     if args.command == 'recent':
         print(' '.join(map(str, get_latest_versions(versions, args.num))))

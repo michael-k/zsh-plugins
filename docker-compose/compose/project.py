@@ -7,6 +7,7 @@ import operator
 from functools import reduce
 
 import enum
+import six
 from docker.errors import APIError
 
 from . import parallel
@@ -24,10 +25,14 @@ from .network import get_networks
 from .network import ProjectNetworks
 from .service import BuildAction
 from .service import ContainerNetworkMode
+from .service import ContainerPidMode
 from .service import ConvergenceStrategy
 from .service import NetworkMode
+from .service import PidMode
 from .service import Service
+from .service import ServiceName
 from .service import ServiceNetworkMode
+from .service import ServicePidMode
 from .utils import microseconds_from_time_nano
 from .volume import ProjectVolumes
 
@@ -57,12 +62,13 @@ class Project(object):
     """
     A collection of services.
     """
-    def __init__(self, name, services, client, networks=None, volumes=None):
+    def __init__(self, name, services, client, networks=None, volumes=None, config_version=None):
         self.name = name
         self.services = services
         self.client = client
         self.volumes = volumes or ProjectVolumes({})
         self.networks = networks or ProjectNetworks({}, False)
+        self.config_version = config_version
 
     def labels(self, one_off=OneOffFilter.exclude):
         labels = ['{0}={1}'.format(LABEL_PROJECT, self.name)]
@@ -71,7 +77,7 @@ class Project(object):
         return labels
 
     @classmethod
-    def from_config(cls, name, config_data, client):
+    def from_config(cls, name, config_data, client, default_platform=None):
         """
         Construct a Project from a config.Config object.
         """
@@ -82,7 +88,7 @@ class Project(object):
             networks,
             use_networking)
         volumes = ProjectVolumes.from_config(name, config_data, client)
-        project = cls(name, [], client, project_networks, volumes)
+        project = cls(name, [], client, project_networks, volumes, config_data.version)
 
         for service_dict in config_data.services:
             service_dict = dict(service_dict)
@@ -96,6 +102,7 @@ class Project(object):
             network_mode = project.get_network_mode(
                 service_dict, list(service_networks.keys())
             )
+            pid_mode = project.get_pid_mode(service_dict)
             volumes_from = get_volumes_from(project, service_dict)
 
             if config_data.version != V1:
@@ -120,6 +127,8 @@ class Project(object):
                     network_mode=network_mode,
                     volumes_from=volumes_from,
                     secrets=secrets,
+                    pid_mode=pid_mode,
+                    platform=service_dict.pop('platform', default_platform),
                     **service_dict)
             )
 
@@ -184,6 +193,25 @@ class Project(object):
             service.remove_duplicate_containers()
         return services
 
+    def get_scaled_services(self, services, scale_override):
+        """
+        Returns a list of this project's services as scaled ServiceName objects.
+
+        services: a list of Service objects
+        scale_override: a dict with the scale to apply to each service (k: service_name, v: scale)
+        """
+        service_names = []
+        for service in services:
+            if service.name in scale_override:
+                scale = scale_override[service.name]
+            else:
+                scale = service.scale_num
+
+            for i in range(1, scale + 1):
+                service_names.append(ServiceName(self.name, service.name, i))
+
+        return service_names
+
     def get_links(self, service_dict):
         links = []
         if 'links' in service_dict:
@@ -223,6 +251,27 @@ class Project(object):
 
         return NetworkMode(network_mode)
 
+    def get_pid_mode(self, service_dict):
+        pid_mode = service_dict.pop('pid', None)
+        if not pid_mode:
+            return PidMode(None)
+
+        service_name = get_service_name_from_network_mode(pid_mode)
+        if service_name:
+            return ServicePidMode(self.get_service(service_name))
+
+        container_name = get_container_name_from_network_mode(pid_mode)
+        if container_name:
+            try:
+                return ContainerPidMode(Container.from_id(self.client, container_name))
+            except APIError:
+                raise ConfigurationError(
+                    "Service '{name}' uses the PID namespace of container '{dep}' which "
+                    "does not exist.".format(name=service_dict['name'], dep=container_name)
+                )
+
+        return PidMode(pid_mode)
+
     def start(self, service_names=None, **options):
         containers = []
 
@@ -243,7 +292,8 @@ class Project(object):
             start_service,
             operator.attrgetter('name'),
             'Starting',
-            get_deps)
+            get_deps,
+        )
 
         return containers
 
@@ -261,7 +311,8 @@ class Project(object):
             self.build_container_operation_with_timeout_func('stop', options),
             operator.attrgetter('name'),
             'Stopping',
-            get_deps)
+            get_deps,
+        )
 
     def pause(self, service_names=None, **options):
         containers = self.containers(service_names)
@@ -281,9 +332,16 @@ class Project(object):
             service_names, stopped=True, one_off=one_off
         ), options)
 
-    def down(self, remove_image_type, include_volumes, remove_orphans=False):
-        self.stop(one_off=OneOffFilter.include)
-        self.find_orphan_containers(remove_orphans)
+    def down(
+            self,
+            remove_image_type,
+            include_volumes,
+            remove_orphans=False,
+            timeout=None,
+            ignore_orphans=False):
+        self.stop(one_off=OneOffFilter.include, timeout=timeout)
+        if not ignore_orphans:
+            self.find_orphan_containers(remove_orphans)
         self.remove_stopped(v=include_volumes, one_off=OneOffFilter.include)
 
         self.networks.remove()
@@ -304,13 +362,15 @@ class Project(object):
             containers,
             self.build_container_operation_with_timeout_func('restart', options),
             operator.attrgetter('name'),
-            'Restarting')
+            'Restarting',
+        )
         return containers
 
-    def build(self, service_names=None, no_cache=False, pull=False, force_rm=False):
+    def build(self, service_names=None, no_cache=False, pull=False, force_rm=False, memory=None,
+              build_args=None, gzip=False):
         for service in self.get_services(service_names):
             if service.can_be_built():
-                service.build(no_cache, pull, force_rm)
+                service.build(no_cache, pull, force_rm, memory, build_args, gzip)
             else:
                 log.info('%s uses an image, skipping' % service.name)
 
@@ -365,7 +425,7 @@ class Project(object):
 
             # TODO: get labels from the API v1.22 , see github issue 2618
             try:
-                # this can fail if the conatiner has been removed
+                # this can fail if the container has been removed
                 container = Container.from_id(self.client, event['id'])
             except APIError:
                 continue
@@ -380,26 +440,46 @@ class Project(object):
            do_build=BuildAction.none,
            timeout=None,
            detached=False,
-           remove_orphans=False):
-
-        warn_for_swarm_mode(self.client)
+           remove_orphans=False,
+           ignore_orphans=False,
+           scale_override=None,
+           rescale=True,
+           start=True,
+           always_recreate_deps=False,
+           reset_container_image=False,
+           renew_anonymous_volumes=False,
+           silent=False,
+           ):
 
         self.initialize()
-        self.find_orphan_containers(remove_orphans)
+        if not ignore_orphans:
+            self.find_orphan_containers(remove_orphans)
+
+        if scale_override is None:
+            scale_override = {}
 
         services = self.get_services_without_duplicate(
             service_names,
             include_deps=start_deps)
 
         for svc in services:
-            svc.ensure_image_exists(do_build=do_build)
-        plans = self._get_convergence_plans(services, strategy)
+            svc.ensure_image_exists(do_build=do_build, silent=silent)
+        plans = self._get_convergence_plans(
+            services, strategy, always_recreate_deps=always_recreate_deps)
+        scaled_services = self.get_scaled_services(services, scale_override)
 
         def do(service):
+
             return service.execute_convergence_plan(
                 plans[service.name],
                 timeout=timeout,
-                detached=detached
+                detached=detached,
+                scale_override=scale_override.get(service.name),
+                rescale=rescale,
+                start=start,
+                project_services=scaled_services,
+                reset_container_image=reset_container_image,
+                renew_anonymous_volumes=renew_anonymous_volumes,
             )
 
         def get_deps(service):
@@ -413,7 +493,7 @@ class Project(object):
             do,
             operator.attrgetter('name'),
             None,
-            get_deps
+            get_deps,
         )
         if errors:
             raise ProjectError(
@@ -431,7 +511,7 @@ class Project(object):
         self.networks.initialize()
         self.volumes.initialize()
 
-    def _get_convergence_plans(self, services, strategy):
+    def _get_convergence_plans(self, services, strategy, always_recreate_deps=False):
         plans = {}
 
         for service in services:
@@ -446,7 +526,13 @@ class Project(object):
                 log.debug('%s has upstream changes (%s)',
                           service.name,
                           ", ".join(updated_dependencies))
-                plan = service.convergence_plan(ConvergenceStrategy.always)
+                containers_stopped = any(
+                    service.containers(stopped=True, filters={'status': ['created', 'exited']}))
+                has_links = any(c.get('HostConfig.Links') for c in service.containers())
+                if always_recreate_deps or containers_stopped or not has_links:
+                    plan = service.convergence_plan(ConvergenceStrategy.always)
+                else:
+                    plan = service.convergence_plan(strategy)
             else:
                 plan = service.convergence_plan(strategy)
 
@@ -454,9 +540,30 @@ class Project(object):
 
         return plans
 
-    def pull(self, service_names=None, ignore_pull_failures=False):
-        for service in self.get_services(service_names, include_deps=False):
-            service.pull(ignore_pull_failures)
+    def pull(self, service_names=None, ignore_pull_failures=False, parallel_pull=False, silent=False,
+             include_deps=False):
+        services = self.get_services(service_names, include_deps)
+
+        if parallel_pull:
+            def pull_service(service):
+                service.pull(ignore_pull_failures, True)
+
+            _, errors = parallel.parallel_execute(
+                services,
+                pull_service,
+                operator.attrgetter('name'),
+                not silent and 'Pulling' or None,
+                limit=5,
+            )
+            if len(errors):
+                combined_errors = '\n'.join([
+                    e.decode('utf-8') if isinstance(e, six.binary_type) else e for e in errors.values()
+                ])
+                raise ProjectError(combined_errors)
+
+        else:
+            for service in services:
+                service.pull(ignore_pull_failures, silent=silent)
 
     def push(self, service_names=None, ignore_push_failures=False):
         for service in self.get_services(service_names, include_deps=False):
@@ -569,41 +676,30 @@ def get_secrets(service, service_secrets, secret_defs):
                 "Service \"{service}\" uses an undefined secret \"{secret}\" "
                 .format(service=service, secret=secret.source))
 
-        if secret_def.get('external_name'):
+        if secret_def.get('external'):
             log.warn("Service \"{service}\" uses secret \"{secret}\" which is external. "
                      "External secrets are not available to containers created by "
                      "docker-compose.".format(service=service, secret=secret.source))
             continue
 
         if secret.uid or secret.gid or secret.mode:
-            log.warn("Service \"{service}\" uses secret \"{secret}\" with uid, "
-                     "gid, or mode. These fields are not supported by this "
-                     "implementation of the Compose file".format(
-                        service=service, secret=secret.source))
+            log.warn(
+                "Service \"{service}\" uses secret \"{secret}\" with uid, "
+                "gid, or mode. These fields are not supported by this "
+                "implementation of the Compose file".format(
+                    service=service, secret=secret.source
+                )
+            )
 
         secrets.append({'secret': secret, 'file': secret_def.get('file')})
 
     return secrets
 
 
-def warn_for_swarm_mode(client):
-    info = client.info()
-    if info.get('Swarm', {}).get('LocalNodeState') == 'active':
-        if info.get('ServerVersion', '').startswith('ucp'):
-            # UCP does multi-node scheduling with traditional Compose files.
-            return
-
-        log.warn(
-            "The Docker Engine you're using is running in swarm mode.\n\n"
-            "Compose does not use swarm mode to deploy services to multiple nodes in a swarm. "
-            "All containers will be scheduled on the current node.\n\n"
-            "To deploy your application across the swarm, "
-            "use `docker stack deploy`.\n"
-        )
-
-
 class NoSuchService(Exception):
     def __init__(self, name):
+        if isinstance(name, six.binary_type):
+            name = name.decode('utf-8')
         self.name = name
         self.msg = "No such service: %s" % self.name
 

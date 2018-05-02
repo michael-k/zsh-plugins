@@ -14,6 +14,7 @@ from requests.exceptions import SSLError
 from requests.packages.urllib3.exceptions import ReadTimeoutError
 
 from ..const import API_VERSION_TO_ENGINE_VERSION
+from .utils import binarystr_to_unicode
 from .utils import is_docker_for_mac_installed
 from .utils import is_mac
 from .utils import is_ubuntu
@@ -56,6 +57,28 @@ def handle_connection_errors(client):
     except (ReadTimeout, socket.timeout) as e:
         log_timeout_error(client.timeout)
         raise ConnectionError()
+    except Exception as e:
+        if is_windows():
+            import pywintypes
+            if isinstance(e, pywintypes.error):
+                log_windows_pipe_error(e)
+                raise ConnectionError()
+        raise
+
+
+def log_windows_pipe_error(exc):
+    if exc.winerror == 232:  # https://github.com/docker/compose/issues/5005
+        log.error(
+            "The current Compose file version is not compatible with your engine version. "
+            "Please upgrade your Compose file to a more recent version, or set "
+            "a COMPOSE_API_VERSION in your environment."
+        )
+    else:
+        log.error(
+            "Windows named pipe error: {} (code: {})".format(
+                binarystr_to_unicode(exc.strerror), exc.winerror
+            )
+        )
 
 
 def log_timeout_error(timeout):
@@ -68,20 +91,23 @@ def log_timeout_error(timeout):
 
 
 def log_api_error(e, client_version):
-    if b'client is newer than server' not in e.explanation:
-        log.error(e.explanation)
+    explanation = binarystr_to_unicode(e.explanation)
+
+    if 'client is newer than server' not in explanation:
+        log.error(explanation)
         return
 
     version = API_VERSION_TO_ENGINE_VERSION.get(client_version)
     if not version:
         # They've set a custom API version
-        log.error(e.explanation)
+        log.error(explanation)
         return
 
     log.error(
         "The Docker Engine version is less than the minimum required by "
         "Compose. Your current project requires a Docker Engine of "
-        "version {version} or greater.".format(version=version))
+        "version {version} or greater.".format(version=version)
+    )
 
 
 def exit_with_error(msg):
@@ -90,12 +116,17 @@ def exit_with_error(msg):
 
 
 def get_conn_error_message(url):
-    if find_executable('docker') is None:
-        return docker_not_found_msg("Couldn't connect to Docker daemon.")
-    if is_docker_for_mac_installed():
-        return conn_error_docker_for_mac
-    if find_executable('docker-machine') is not None:
-        return conn_error_docker_machine
+    try:
+        if find_executable('docker') is None:
+            return docker_not_found_msg("Couldn't connect to Docker daemon.")
+        if is_docker_for_mac_installed():
+            return conn_error_docker_for_mac
+        if find_executable('docker-machine') is not None:
+            return conn_error_docker_machine
+    except UnicodeDecodeError:
+        # https://github.com/docker/compose/issues/5442
+        # Ignore the error and print the generic message instead.
+        pass
     return conn_error_generic.format(url=url)
 
 

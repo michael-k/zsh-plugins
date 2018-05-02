@@ -7,6 +7,7 @@ from requests.exceptions import ConnectionError
 
 from compose.cli import errors
 from compose.cli.errors import handle_connection_errors
+from compose.const import IS_WINDOWS_PLATFORM
 from tests import mock
 
 
@@ -42,10 +43,56 @@ class TestHandleConnectionErrors(object):
         _, args, _ = mock_logging.error.mock_calls[0]
         assert "Docker Engine of version 1.10.0 or greater" in args[0]
 
+    def test_api_error_version_mismatch_unicode_explanation(self, mock_logging):
+        with pytest.raises(errors.ConnectionError):
+            with handle_connection_errors(mock.Mock(api_version='1.22')):
+                raise APIError(None, None, u"client is newer than server")
+
+        _, args, _ = mock_logging.error.mock_calls[0]
+        assert "Docker Engine of version 1.10.0 or greater" in args[0]
+
     def test_api_error_version_other(self, mock_logging):
         msg = b"Something broke!"
         with pytest.raises(errors.ConnectionError):
             with handle_connection_errors(mock.Mock(api_version='1.22')):
                 raise APIError(None, None, msg)
 
+        mock_logging.error.assert_called_once_with(msg.decode('utf-8'))
+
+    def test_api_error_version_other_unicode_explanation(self, mock_logging):
+        msg = u"Something broke!"
+        with pytest.raises(errors.ConnectionError):
+            with handle_connection_errors(mock.Mock(api_version='1.22')):
+                raise APIError(None, None, msg)
+
         mock_logging.error.assert_called_once_with(msg)
+
+    @pytest.mark.skipif(not IS_WINDOWS_PLATFORM, reason='Needs pywin32')
+    def test_windows_pipe_error_no_data(self, mock_logging):
+        import pywintypes
+        with pytest.raises(errors.ConnectionError):
+            with handle_connection_errors(mock.Mock(api_version='1.22')):
+                raise pywintypes.error(232, 'WriteFile', 'The pipe is being closed.')
+
+        _, args, _ = mock_logging.error.mock_calls[0]
+        assert "The current Compose file version is not compatible with your engine version." in args[0]
+
+    @pytest.mark.skipif(not IS_WINDOWS_PLATFORM, reason='Needs pywin32')
+    def test_windows_pipe_error_misc(self, mock_logging):
+        import pywintypes
+        with pytest.raises(errors.ConnectionError):
+            with handle_connection_errors(mock.Mock(api_version='1.22')):
+                raise pywintypes.error(231, 'WriteFile', 'The pipe is busy.')
+
+        _, args, _ = mock_logging.error.mock_calls[0]
+        assert "Windows named pipe error: The pipe is busy. (code: 231)" == args[0]
+
+    @pytest.mark.skipif(not IS_WINDOWS_PLATFORM, reason='Needs pywin32')
+    def test_windows_pipe_error_encoding_issue(self, mock_logging):
+        import pywintypes
+        with pytest.raises(errors.ConnectionError):
+            with handle_connection_errors(mock.Mock(api_version='1.22')):
+                raise pywintypes.error(9999, 'WriteFile', 'I use weird characters \xe9')
+
+        _, args, _ = mock_logging.error.mock_calls[0]
+        assert 'Windows named pipe error: I use weird characters \xe9 (code: 9999)' == args[0]

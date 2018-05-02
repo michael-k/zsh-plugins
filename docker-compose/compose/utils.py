@@ -9,8 +9,11 @@ import logging
 import ntpath
 
 import six
+from docker.errors import DockerException
+from docker.utils import parse_bytes as sdk_parse_bytes
 
 from .errors import StreamParseError
+from .timeparse import MULTIPLIERS
 from .timeparse import timeparse
 
 
@@ -98,7 +101,7 @@ def json_stream(stream):
 
 
 def json_hash(obj):
-    dump = json.dumps(obj, sort_keys=True, separators=(',', ':'))
+    dump = json.dumps(obj, sort_keys=True, separators=(',', ':'), default=lambda x: x.repr())
     h = hashlib.sha256()
     h.update(dump.encode('utf8'))
     return h.hexdigest()
@@ -109,7 +112,7 @@ def microseconds_from_time_nano(time_nano):
 
 
 def nanoseconds_from_time_seconds(time_seconds):
-    return time_seconds * 1000000000
+    return int(time_seconds / MULTIPLIERS['nano'])
 
 
 def parse_seconds_float(value):
@@ -120,7 +123,7 @@ def parse_nanoseconds_int(value):
     parsed = timeparse(value or '')
     if parsed is None:
         return None
-    return int(parsed * 1000000000)
+    return nanoseconds_from_time_seconds(parsed)
 
 
 def build_string_dict(source_dict):
@@ -133,3 +136,18 @@ def splitdrive(path):
     if path[0] in ['.', '\\', '/', '~']:
         return ('', path)
     return ntpath.splitdrive(path)
+
+
+def parse_bytes(n):
+    try:
+        return sdk_parse_bytes(n)
+    except DockerException:
+        return None
+
+
+def unquote_path(s):
+    if not s:
+        return s
+    if s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s

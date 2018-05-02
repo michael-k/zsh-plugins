@@ -1,52 +1,20 @@
-FROM debian:wheezy
+FROM python:3.6
 
 RUN set -ex; \
     apt-get update -qq; \
     apt-get install -y \
         locales \
-        gcc \
-        make \
-        zlib1g \
-        zlib1g-dev \
-        libssl-dev \
-        git \
-        ca-certificates \
         curl \
-        libsqlite3-dev \
-        libbz2-dev \
-    ; \
-    rm -rf /var/lib/apt/lists/*
+        python-dev \
+        git
 
-RUN curl https://get.docker.com/builds/Linux/x86_64/docker-1.8.3 \
-        -o /usr/local/bin/docker && \
-    chmod +x /usr/local/bin/docker
-
-# Build Python 2.7.13 from source
-RUN set -ex; \
-    curl -L https://www.python.org/ftp/python/2.7.13/Python-2.7.13.tgz | tar -xz; \
-    cd Python-2.7.13; \
-    ./configure --enable-shared; \
-    make; \
-    make install; \
-    cd ..; \
-    rm -rf /Python-2.7.13
-
-# Build python 3.4 from source
-RUN set -ex; \
-    curl -L https://www.python.org/ftp/python/3.4.6/Python-3.4.6.tgz | tar -xz; \
-    cd Python-3.4.6; \
-    ./configure --enable-shared; \
-    make; \
-    make install; \
-    cd ..; \
-    rm -rf /Python-3.4.6
-
-# Make libpython findable
-ENV LD_LIBRARY_PATH /usr/local/lib
-
-# Install pip
-RUN set -ex; \
-    curl -L https://bootstrap.pypa.io/get-pip.py | python
+RUN curl -fsSL -o dockerbins.tgz "https://download.docker.com/linux/static/stable/x86_64/docker-17.12.0-ce.tgz" && \
+    SHA256=692e1c72937f6214b1038def84463018d8e320c8eaf8530546c84c2f8f9c767d; \
+    echo "${SHA256}  dockerbins.tgz" | sha256sum -c - && \
+    tar xvf dockerbins.tgz docker/docker --strip-components 1 && \
+    mv docker /usr/local/bin/docker && \
+    chmod +x /usr/local/bin/docker && \
+    rm dockerbins.tgz
 
 # Python3 requires a valid locale
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
@@ -68,4 +36,4 @@ RUN tox --notest
 ADD . /code/
 RUN chown -R user /code/
 
-ENTRYPOINT ["/code/.tox/py27/bin/docker-compose"]
+ENTRYPOINT ["/code/.tox/py36/bin/docker-compose"]

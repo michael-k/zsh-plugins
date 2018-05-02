@@ -2,13 +2,14 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 
 import docker
-import mock
 import pytest
 
+from .. import mock
 from compose import bundle
 from compose import service
 from compose.cli.errors import UserError
 from compose.config.config import Config
+from compose.const import COMPOSEFILE_V2_0 as V2_0
 
 
 @pytest.fixture
@@ -74,11 +75,13 @@ def test_to_bundle():
         {'name': 'b', 'build': './b'},
     ]
     config = Config(
-        version=2,
+        version=V2_0,
         services=services,
         volumes={'special': {}},
         networks={'extra': {}},
-        secrets={})
+        secrets={},
+        configs={}
+    )
 
     with mock.patch('compose.bundle.log.warn', autospec=True) as mock_log:
         output = bundle.to_bundle(config, image_digests)

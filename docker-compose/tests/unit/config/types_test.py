@@ -3,12 +3,13 @@ from __future__ import unicode_literals
 
 import pytest
 
-from compose.config.config import V1
-from compose.config.config import V2_0
 from compose.config.errors import ConfigurationError
 from compose.config.types import parse_extra_hosts
+from compose.config.types import ServicePort
 from compose.config.types import VolumeFromSpec
 from compose.config.types import VolumeSpec
+from compose.const import COMPOSEFILE_V1 as V1
+from compose.const import COMPOSEFILE_V2_0 as V2_0
 
 
 def test_parse_extra_hosts_list():
@@ -39,6 +40,96 @@ def test_parse_extra_hosts_dict():
         'www.example.com': '192.168.0.17',
         'api.example.com': '192.168.0.18'
     }
+
+
+class TestServicePort(object):
+    def test_parse_dict(self):
+        data = {
+            'target': 8000,
+            'published': 8000,
+            'protocol': 'udp',
+            'mode': 'global',
+        }
+        ports = ServicePort.parse(data)
+        assert len(ports) == 1
+        assert ports[0].repr() == data
+
+    def test_parse_simple_target_port(self):
+        ports = ServicePort.parse(8000)
+        assert len(ports) == 1
+        assert ports[0].target == 8000
+
+    def test_parse_complete_port_definition(self):
+        port_def = '1.1.1.1:3000:3000/udp'
+        ports = ServicePort.parse(port_def)
+        assert len(ports) == 1
+        assert ports[0].repr() == {
+            'target': 3000,
+            'published': 3000,
+            'external_ip': '1.1.1.1',
+            'protocol': 'udp',
+        }
+        assert ports[0].legacy_repr() == port_def
+
+    def test_parse_ext_ip_no_published_port(self):
+        port_def = '1.1.1.1::3000'
+        ports = ServicePort.parse(port_def)
+        assert len(ports) == 1
+        assert ports[0].legacy_repr() == port_def + '/tcp'
+        assert ports[0].repr() == {
+            'target': 3000,
+            'external_ip': '1.1.1.1',
+        }
+
+    def test_repr_published_port_0(self):
+        port_def = '0:4000'
+        ports = ServicePort.parse(port_def)
+        assert len(ports) == 1
+        assert ports[0].legacy_repr() == port_def + '/tcp'
+
+    def test_parse_port_range(self):
+        ports = ServicePort.parse('25000-25001:4000-4001')
+        assert len(ports) == 2
+        reprs = [p.repr() for p in ports]
+        assert {
+            'target': 4000,
+            'published': 25000
+        } in reprs
+        assert {
+            'target': 4001,
+            'published': 25001
+        } in reprs
+
+    def test_parse_port_publish_range(self):
+        ports = ServicePort.parse('4440-4450:4000')
+        assert len(ports) == 1
+        reprs = [p.repr() for p in ports]
+        assert {
+            'target': 4000,
+            'published': '4440-4450'
+        } in reprs
+
+    def test_parse_invalid_port(self):
+        port_def = '4000p'
+        with pytest.raises(ConfigurationError):
+            ServicePort.parse(port_def)
+
+    def test_parse_invalid_publish_range(self):
+        port_def = '-4000:4000'
+        with pytest.raises(ConfigurationError):
+            ServicePort.parse(port_def)
+
+        port_def = 'asdf:4000'
+        with pytest.raises(ConfigurationError):
+            ServicePort.parse(port_def)
+
+        port_def = '1234-12f:4000'
+        with pytest.raises(ConfigurationError):
+            ServicePort.parse(port_def)
+
+        port_def = '1234-1235-1239:4000'
+        with pytest.raises(ConfigurationError):
+            ServicePort.parse(port_def)
 
 
 class TestVolumeSpec(object):
