@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef rts
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,47 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/galeone/rts
+#
+# Usage of rts:
+#   -headers string
+#     	Headers to add in every request
+#   -help
+#     	prints this help
+#   -insecure
+#     	Disables TLS Certificate check for HTTPS, use in case HTTPS Server Certificate is signed by an unknown authority
+#   -out string
+#     	Output file. Stdout is used if not specified
+#   -pkg string
+#     	Package name (default "main")
+#   -routes string
+#     	Routes to request. One per line (default "routes.txt")
+#   -server string
+#     	sets the server address (default "http://localhost:9090")
+#   -substruct
+#     	Creates types for sub-structs
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _rts() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
+    '-headers[Headers to add in every request]:header' \
+    '-help[prints this help]' \
+    '-insecure[Disables TLS Certificate check for HTTPS, use in case HTTPS Server Certificate is signed by an unknown authority]' \
+    '-out[Output file. Stdout is used if not specified]:output file:_files' \
+    '-pkg[Package name (default "main")]:package name' \
+    '-routes[Routes to request. One per line (default "routes.txt")]:routes filepath:_files' \
+    '-server[sets the server address (default "http://localhost:9090")]:server url' \
+    '-substruct[Creates types for sub-structs]' \
     '*:: :->args' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_rts "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

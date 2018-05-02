@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef gotags
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,54 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/jstemmer/gotags
+#
+# gotags version 1.4.1
+#
+# Usage: gotags [options] file(s)
+#
+#   -L string
+#     	source file names are read from the specified file. If file is "-", input is read from standard in.
+#   -R	recurse into directories in the file list.
+#   -extra string
+#     	include additional tags with package and receiver name prefixes (+q)
+#   -f string
+#     	write output to specified file. If file is "-", output is written to standard out.
+#   -fields string
+#     	include selected extension fields (only +l).
+#   -list-languages
+#     	list supported languages.
+#   -silent
+#     	do not produce any output on error.
+#   -sort
+#     	sort tags. (default true)
+#   -tag-relative
+#     	file paths should be relative to the directory containing the tag file.
+#   -v	print version.
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _gotags() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-L[source file names are read from the specified file. If file is "-", input is read from standard in.]:filename:_files' \
+    '-R[recurse into directories in the file list.]' \
+    '-extra[include additional tags with package and receiver name prefixes]:prefix:(+q)' \
+    '-f[write output to specified file. If file is "-", output is written to standard out.]:output file:_files' \
+    '-fields[include selected extension fields]:field:(+l)' \
+    '-list-languages[list supported languages.]' \
+    '-silent[do not produce any output on error.]' \
+    '-sort[sort tags. (default true)]' \
+    '-tag-relative[file paths should be relative to the directory containing the tag file.]' \
+    '-v[print version.]' \
+    '*::path:_files' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_gotags "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

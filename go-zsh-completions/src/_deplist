@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef deplist
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,42 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/cespare/deplist
+#
+# Usage:
+#     deplist [flags] [pkg]
+# where pkg is the name of a Go package (e.g., github.com/cespare/deplist). If no
+# package name is given, the current directory is used.
+#
+# Flags:
+#   -std
+#         Include standard library dependencies
+#   -t    Include test dependencies
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _deplist() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
+  _go_packages() {
+    local -a gopaths
+    gopaths=("${(s/:/)$(go env GOPATH)}")
+    for p in $gopaths; do
+      _alternative ':packages:_path_files -W "$p/src" -/'
+    done
+  }
 
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    "-std[Include standard library dependencies]" \
+    '-t[Include test dependencies]' \
+    '-h[Show usage]' \
+    '1: :_go_packages' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_deplist "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

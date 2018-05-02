@@ -1,60 +1,91 @@
-#compdef go
-# ------------------------------------------------------------------------------
-# Copyright (c) 2016 Github zsh-users - http://github.com/zsh-users
-# Copyright (c) 2013-2015 Robby Russell and contributors (see
-# https://github.com/robbyrussell/oh-my-zsh/contributors)
-# Copyright (c) 2010-2014 Go authors
+#compdef goapp
+
+# -----------------------------------------------------------------------------
+# The BSD-3-Clause License
+#
+# Copyright (c) 2016, Koichi Shiraishi
+# All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in the
-#       documentation and/or other materials provided with the distribution.
-#     * Neither the name of the zsh-users nor the
-#       names of its contributors may be used to endorse or promote products
-#       derived from this software without specific prior written permission.
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# * Neither the name of que nor the names of its
+#   contributors may be used to endorse or promote products derived from
+#   this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL ZSH-USERS BE LIABLE FOR ANY DIRECT,
-# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# ------------------------------------------------------------------------------
-# Description
-# -----------
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+# -----------------------------------------------------------------------------
 #
-#  Completion script for go 1.5 (http://golang.org).
+# Go is a tool for managing Go source code.
 #
-# ------------------------------------------------------------------------------
-# Authors
-# -------
+# Usage:
 #
-#  * Mikkel Oscar Lyderik <mikkeloscar@gmail.com>
-#  * oh-my-zsh authors:
-#        https://github.com/robbyrussell/oh-my-zsh/blob/master/plugins/golang/golang.plugin.zsh
-#  * Go authors
+#   goapp command [arguments]
 #
-# ------------------------------------------------------------------------------
+# The commands are:
 #
-# go.googlesource.com/go
+#   serve       starts a local development App Engine server
+#   deploy      deploys your application to App Engine
+#   build       compile packages and dependencies
+#   clean       remove object files
+#   doc         show documentation for package or symbol
+#   env         print Go environment information
+#   fix         run go tool fix on packages
+#   fmt         run gofmt on package sources
+#   generate    generate Go files by processing source
+#   get         download and install packages and dependencies
+#   install     compile and install packages and dependencies
+#   list        list packages
+#   run         compile and run Go program
+#   test        test packages
+#   tool        run specified go tool
+#   version     print Go version
+#   vet         run go tool vet on packages
 #
-# ------------------------------------------------------------------------------
+# Use "goapp help [command]" for more information about a command.
+#
+# Additional help topics:
+#
+#   c           calling between Go and C
+#   buildmode   description of build modes
+#   filetype    file types
+#   gopath      GOPATH environment variable
+#   environment environment variables
+#   importpath  import path syntax
+#   packages    description of package lists
+#   testflag    description of testing flags
+#   testfunc    description of testing functions
+#
+# Use "goapp help [topic]" for more information about that topic.
+#
+# -----------------------------------------------------------------------------
 
-typeset -A opt_args
+function _goapp() {
+  local context curcontext=$curcontext state line ret=1
+  declare -A opt_args
 
-_go() {
   local -a commands
-  local -a __build_flags
-  local -a __test_build_flags __test_binary_flags __test_profile_flags
 
   commands=(
+  'serve:starts a local development App Engine server'
+  'deploy:deploys your application to App Engine'
   'build:compile packages and dependencies'
   'clean:remove object files'
   'doc:show documentation for package or symbol'
@@ -73,10 +104,6 @@ _go() {
   'help:get more information about a command'
   )
 
-  _go_files() {
-    _files -g "*.go(-.)"
-  }
-
   __go_packages() {
     local gopaths
     declare -a gopaths
@@ -85,7 +112,7 @@ _go() {
     for p in $gopaths; do
       _alternative ':go packages:_path_files -W "$p/src" -/'
     done
-    _alternative '*:go file:_go_files'
+    _alternative '*:go file:_files -g "*.go(-.)"'
   }
 
   __build_flags() {
@@ -108,8 +135,7 @@ _go() {
       '-pkgdir[install and load all packages from dir]:dir' \
       '-tags=[list of build tags to consider satisfied]:tags' \
       '-toolexec[program to use to invoke toolchain programs]:args' \
-      '-debug-actiongraph[Undocumented, unstable debugging flags. action graph]' \
-      '-debug-deprecated-importcfg[Undocumented, unstable debugging flags. deprecated import config]'
+      '--debug[debug]'
 
     case $state in
       asmflags)
@@ -268,10 +294,8 @@ _go() {
   '-args[Pass the remainder of the command line to the test binary]'
   '-c[Compile the test binary to pkg.test but do not run it]'
   "-exec=[Run the test binary using 'xprog']:xprog"
-  "-json[Convert test output to JSON suitable for automated processing. See 'go doc test2json' for the encoding details]"
   '-i[Install packages that are dependencies of the test]'
   '-o[Compile the test binary to the named file]:binary file name:_files'
-  '-vet[Configure the invocation of "go vet" during "go test" to use the comma-separated list of vet checks]:list'
   )
 
   # TODO(zchee): Support for regexp keyword
@@ -311,21 +335,37 @@ _go() {
   case $state in
     args)
       case $words[1] in
+        serve)
+          _arguments \
+            '-host[controls the host name to which application modules should bind (default localhost)]:host' \
+            '-port[controls the lowest port to which application modules should bind (default 8080)]:port' \
+            '-use_mtime_file_watcher[causes the development server to use mtime polling for detecting source code changes, as opposed to inotify watches]' \
+            '-admin_port[controls the port to which the admin server should bind (default 8000)]:admin port' \
+            '-clear_datastore[clears the local datastore on startup.]'
+          ;;
+
+        deploy)
+          _arguments \
+            '-application[sets the application ID, overriding the application value from the app.yaml file.]:application ID'\
+            '-version[sets the major version, overriding the version value from the app.yaml file.]:version' \
+            '-oauth[causes authentication to be done using OAuth2, instead of interactive password auth.]' \
+          ;;
+
         build)
           _arguments \
             '-o[force build to write to named output file]:file:_files' \
             '-i[installs the packages that are dependencies of the target]' \
             '*: :__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
         clean)
           _arguments \
-            '-cache[clean to remove the entire go build cache, in addition to cleaning specified packages (if any)]' \
-            '-testcache[clean to expire all test results in the go build cache]' \
             '-i[remove corresponding installed archive or binary]' \
             '-r[apply clean recursively on all dependencies]' \
             '*:go packages:__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
@@ -335,37 +375,6 @@ _go() {
             '-cmd[treat a command (package main) like a regular package]' \
             '-u[show docs for unexported and exported symbols and methods]' \
             '*: :__go_packages'
-          ;;
-
-        env)
-          local -a _envs
-          _envs=(
-          'GOARCH:The architecture, or processor, for which to compile code.'
-          "GOBIN:The directory where 'go install' will install a command."
-          'GOCACHE:The directory where the go command will store cached information for reuse in future builds.'
-          'GOEXE:It’s the value of the executable suffix. It’s set automatically in build.go.'
-          'GOHOSTARCH:The name of the host operating system.'
-          'GOHOSTOS:The name of the compilation architecture.'
-          'GOOS:The operating system for which to compile code.'
-          'GOPATH:Specifies the location of your workspace.'
-          'GORACE:Options for the race detector.'
-          'GOROOT:The root of the go tree.'
-          'GOTMPDIR:The directory where the go command will write temporary source files, packages, and binaries.'
-          'GOTOOLDIR:Use by things that want to get to the tool dir. It is explicitly NOT something that is pulled from the environment.'
-          "GCCGO:The gccgo command to run for 'go build -compiler=gccgo'."
-          'CC:The command to use to compile C code.'
-          'CXX:The command to use to compile C++ code.'
-          'CGO_ENABLED:Whether the cgo command is supported. Either 0 or 1.'
-          'CGO_CFLAGS:Flags that cgo will pass to the compiler when compiling C code.'
-          'CGO_CPPFLAGS:Flags that cgo will pass to the compiler when compiling C or C++ code.'
-          'CGO_CXXFLAGS:Flags that cgo will pass to the compiler when compiling C++ code.'
-          'CGO_FFLAGS:Flags that cgo will pass to the compiler when compiling Fortran code.'
-          'CGO_LDFLAGS:Flags that cgo will pass to the compiler when linking.'
-          'PKG_CONFIG:Path to pkg-config tool.'
-          'GOGCCFLAGS:Flags that gccgo command.'
-          )
-          _arguments \
-            "*: :{_describe 'envs' _envs}" \
           ;;
 
         fix)
@@ -398,13 +407,14 @@ _go() {
             '-t[also download the packages required to build tests]' \
             '-u[use the network to update the named packages]' \
             '*: :__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
         install)
           _arguments \
-            '-i[installs the dependencies of the named packages as well]' \
             '*: :__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
@@ -414,13 +424,15 @@ _go() {
             '-f[specifies an alternate format for the list]:format' \
             '-json[causes package data to be printed in JSON format]' \
             "*:go file:{ _alternative ': :__go_packages' _files }"
+
             _alternative ':build flags:__build_flags'
           ;;
 
         run)
           _arguments \
             '-exec[invoke the binary using xprog]:xporg' \
-            '1:go run file:_go_files'
+            '1:go run file:_files -g "*.go"'
+
             _alternative ':build flags:__build_flags'
           ;;
 
@@ -430,29 +442,18 @@ _go() {
             ${__test_binary_flags[@]} \
             ${__test_profile_flags[@]} \
             '*: :__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
         tool)
           local -a tools
           tools=(
-          'addr2line:minimal simulation of the GNU addr2line tool'
-          'api:computes the exported API of a set of Go packages'
           'asm:assembles the source file into an object file'
-          'buildid:Buildid displays or updates the build ID stored in a Go package or binary. By default, buildid prints the build ID found in the named file'
           'cgo:enables the creation of Go packages that call C code'
           'compile:compiles a single Go package comprising the files named on the command line'
           'cover:analyzing the coverage profiles generated by go test -coverprofile'
-          'dist:bootstrapping tool for the Go distribution'
-          'doc:Show the documentation for the package, symbol, and method'
-          'fix:finds Go programs that use old APIs and rewrites them to use newer ones'
           'link:reads the Go archive or object for a package, and combines them into an executable binary'
-          'nm:lists the symbols defined or used by an object file, archive, or executable'
-          'objdump:disassembles executable files'
-          'pack:simple version of the traditional Unix ar tool'
-          'pprof:interprets and displays profiles of Go programs'
-          'trace:viewing trace files'
-          'vet:examines Go source code and reports suspicious constructs'
           )
 
           _arguments \
@@ -463,29 +464,9 @@ _go() {
           case $state in
             args)
               case $words[1] in
-                addr2line)
-                  _arguments \
-                    '*:binary:_object_files'
-                  ;;
-
-                api)
-                  _arguments \
-                    '-allow_new[allow API additions (default true)]' \
-                    '-c[optional comma-separated filename(s) to check API against]:string' \ 
-                    '-contexts[optional comma-separated list of <goos>-<goarch>[-cgo] to override default contexts]:string' \
-                    '-except[optional filename of packages that are allowed to change without triggering a failure in the tool]:string' \
-                    '-next[optional filename of tentative upcoming API features for the next release]:string' \
-                    '-v[verbose debugging]'
-                  ;;
-
                 asm)
                   _arguments \
                     ${__asm_flags[@]}
-                  ;;
-
-                buildid)
-                  _arguments \
-                    '-w[rewrites the build ID found in the file to accurately record a content hash of the file]:_files'
                   ;;
 
                 cgo)
@@ -527,23 +508,6 @@ _go() {
                     '-o[file for output]:file:_files' \
                     '-var=[name of coverage variable to generate]:coverage var name' \
                     '*:file:_path_files -g "*.go"'
-                  ;;
-
-                #----------------------------
-
-                doc)
-                  _arguments \
-                    '-c[respect case when matching symbols]' \
-                    '-cmd[treat a command (package main) like a regular package]' \
-                    '-u[show docs for unexported and exported symbols and methods]' \
-                    ;;
-
-                fix)
-                  _arguments \
-                    '-diff[display diffs instead of rewriting files]' \
-                    '-force[force fixes to run even if the code looks updated]:string' \
-                    '-r[restrict the rewrites]:string' \
-                    '*:files:_files'
                   ;;
 
                 link)
@@ -589,164 +553,6 @@ _go() {
                     '-w[disable DWARF generation]' \
                     '*:files:_files'
                   ;;
-
-                objdump)
-                  _arguments \
-                    '-s[only dump symbols matching this regexp]:regexp' \
-                    '*:files:_files'
-                  ;;
-
-                pack)
-                  _arguments '1:ops:(c p r t x)' '::verbose:(v)' ':files:_files'
-                  ;;
-
-                pprof)
-                  local -a output_format output_file_parameter output_granularity comparison sorting
-                  local -a dynamic_profile profile_trimming sample_index sample_heap sample_contention
-                  local -a filtering miscellaneous
-
-                  # Output format (only set one)
-                  output_format=(
-                  '(-disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-callgrind[Outputs a graph in callgrind format]'
-                  '(-callgrind -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-disasm=[Output annotated assembly for functions matching regexp or address]:functions regexp pattern'
-                  '(-callgrind -disasm -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-dot[Outputs a graph in DOT format]'
-                  '(-callgrind -disasm -dot -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-eog[Visualize graph through eog]'
-                  '(-callgrind -disasm -dot -eog -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-evince[Visualize graph through evince]'
-                  '(-callgrind -disasm -dot -eog -evince -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-gif[Outputs a graph image in GIF format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-gv[Visualize graph through gv]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-list=[Output annotated source for functions matching regexp]:functions regexp pattern'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -peak -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-pdf[Outputs a graph in PDF format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -png -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-peek=[Output callers/callees of functions matching regexp]:functions regexp pattern'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -proto -ps -raw -svg -tags -text -top -tree -web -weblist)-png[Outputs a graph image in PNG format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -ps -raw -svg -tags -text -top -tree -web -weblist)-proto[Outputs the profile in compressed protobuf format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -raw -svg -tags -text -top -tree -web -weblist)-ps[Outputs a graph in PS format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -svg -tags -text -top -tree -web -weblist)-raw[Outputs a text representation of the raw profile]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -tags -text -top -tree -web -weblist)-svg[Outputs a graph in SVG format]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -text -top -tree -web -weblist)-tags[Outputs all tags in the profile]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -top -tree -web -weblist)-text[Outputs top entries in text form]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -tree -web -weblist)-top[Outputs top entries in text form]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -web -weblist)-tree[Outputs a text rendering of call graph]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -weblist)-web[Visualize graph through web browser]'
-                  '(-callgrind -disasm -dot -eog -evince -gif -gv -list -pdf -peak -png -proto -ps -raw -svg -tags -text -top -tree -web)-weblist=[Output annotated source in HTML for functions matching regexp or address]:functions regexp pattern'
-                  )
-                  output_file_parameter=(
-                  '-output:Generate output on file f (stdout by default)'
-                  )
-                  # Output granularity (only set one)
-                  output_granularity=(
-                  '(-files -lines -addresses)-functions[Report at function level \[default\]]'
-                  '(-functions -lines -addresses)-files[Report at source file level]'
-                  '(-functions -files -addresses)-lines[Report at source line level]'
-                  '(-functions -files -lines)-addresses[Report at address level]'
-                  )
-                  comparison=(
-                  '-base:Show delta from this profile'
-                  '-drop_negative:Ignore negative differences'
-                  )
-                  sorting=(
-                  '-cum:Sort by cumulative data'
-                  )
-                  dynamic_profile=(
-                  '-seconds:Length of time for dynamic profiles'
-                  )
-                  profile_trimming=(
-                  '-nodecount:Max number of nodes to show'
-                  '-nodefraction:Hide nodes below <f>*total'
-                  '-edgefraction:Hide edges below <f>*total'
-                  )
-                  sample_index=(
-                  '-sample_index:Index of sample value to display'
-                  '-mean:Average sample value over first value'
-                  )
-                  sample_heap=(
-                  '-inuse_space:Display in-use memory size'
-                  '-inuse_objects:Display in-use object counts'
-                  '-alloc_space:Display allocated memory size'
-                  '-alloc_objects:Display allocated object counts'
-                  )
-                  sample_contention=(
-                  '-total_delay:Display total delay at each region'
-                  '-contentions:Display number of delays at each region'
-                  '-mean_delay:Display mean delay at each region'
-                  )
-                  filtering=(
-                  '-runtime:Show runtime call frames in memory profiles'
-                  '-focus:Restricts to paths going through a node matching regexp'
-                  '-ignore:Skips paths going through any nodes matching regexp'
-                  '-tagfocus:Restrict to samples tagged with key:value matching regexp'
-                  '-tagignore:Discard samples tagged with key:value matching regexp'
-                  )
-                  miscellaneous=(
-                  '-call_tree:Generate a context-sensitive call tree'
-                  '-unit:Convert all samples to unit u for display'
-                  '-divide_by:Scale all samples by dividing them by f'
-                  '-buildid:Override build id for main binary in profile'
-                  '-tools:Search path for object-level tools'
-                  '-help:This message'
-                  )
-
-                  _arguments \
-                    '1:target binary:_files' \
-                    '*:profile data:_files' \
-                    $output_format \
-                    $output_granularity
-
-                  _describe -t output_file_parameter "Output file parameters (for file-based output formats):" output_file_parameter
-                  # _describe -t output_granularity "Output granularity (only set one):" output_granularity
-                  _describe -t comparison "Comparison options:" comparison
-                  _describe -t sorting "Output options:" sorting
-                  _describe -t dynamic_profile "Dynamic profile options:" dynamic_profile
-                  _describe -t profile_trimming "Profile trimming options:" profile_trimming
-                  _describe -t sample_index "Sample value selection option (by index):" sample_index
-                  _describe -t sample_heap "Sample value selection option (for heap profiles):" sample_heap
-                  _describe -t sample_contention "Sample value selection option (for contention profiles):" sample_contention
-                  _describe -t filtering "Filtering options:" filtering
-                  _describe -t miscellaneous "miscellaneous:" miscellaneous
-                  ;;
-
-                trace)
-                  _arguments \
-                    '-http=[HTTP service address]:addr' \
-                    '*:files:_files'
-                  ;;
-
-                vet)
-                  _arguments \
-                    '-all[check everything]' \
-                    '-asmdecl[check assembly against Go declarations]' \
-                    '-assign[check for useless assignments]' \
-                    '-atomic[check for common mistaken usages of the sync/atomic]' \
-                    '-bool[check for mistakes involving boolean operators]' \
-                    '-buildtags[check that +build tags are valid]' \
-                    '-composites[check that composite literals used field-keyed elements]' \
-                    '-compositewhitelist[use composite white list]' \
-                    '-copylocks[check that locks are not passed by value]' \
-                    '-methods[check that canonically named methods are canonically defined]' \
-                    '-nilfunc[check for comparisons between functions and nil]' \
-                    '-printf[check printf-like invocations]' \
-                    '-printfuncs[print function names to check]:string' \
-                    '-rangeloops[check that range loop variables are used correctly]' \
-                    '-shadow[check for shadowed variables]' \
-                    '-shadowstrict[whether to be strict about shadowing]' \
-                    '-shift[check for useless shifts]' \
-                    '-structtags[check that struct field tags have canonical format]' \
-                    '-tags[list of build tags to apply when parsing]:list' \
-                    '-test[for testing only: sets -all and -shadow]' \
-                    '-unreachable[check for unreachable code]' \
-                    '-unsafeptr[check for misuse of unsafe.Pointer]' \
-                    '-unusedfuncs[list of functions whose results must be used]:string' \
-                    '-unusedresult[check for unused result of calls to functions in -unusedfuncs]' \
-                    '-unusedstringmethods[list of methods whose results must be used]:string' \
-                    '-v[verbose]' \
-                    '*:files:_files'
-                  ;;
-
-                yacc)
-                  _arguments \
-                    '-o[output]:output' \
-                    '-v[parsetable]:parsetable' \
-                    '*:files:_files'
-                  ;;
               esac
               ;;
           esac
@@ -758,6 +564,7 @@ _go() {
             '-n[print commands that would be executed]' \
             '-x[prints commands as they are executed]' \
             '*:build flags:__go_packages'
+
           _alternative ':build flags:__build_flags'
           ;;
 
@@ -774,6 +581,7 @@ _go() {
           'testflag:description of testing flags'
           'testfunc:description of testing functions'
           )
+
           _arguments "1: :{_describe 'command' commands -- topics}"
           ;;
       esac
@@ -781,6 +589,6 @@ _go() {
   esac
 }
 
-_go
+_goapp "$*"
 
-# vim:ft=zsh:sts=2:sw=2:ts=2:et
+# vim:ft=zsh:et:sts=2:sw=2

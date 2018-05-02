@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef go-langserver
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,55 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/sourcegraph/go-langserver
+#
+# Usage of go-langserver:
+#   -addr string
+#     	server listen address (tcp) (default ":4389")
+#   -freeosmemory
+#     	aggressively free memory back to the OS (default true)
+#   -func-snippet-enabled
+#     	enable argument snippets on func completion (default true)
+#   -gocodecompletion
+#     	enable completion (extra memory burden)
+#   -logfile string
+#     	also log to this file (in addition to stderr)
+#   -maxparallelism int
+#     	use at max N parallel goroutines to fulfill requests (default -1)
+#   -mode string
+#     	communication mode (stdio|tcp) (default "stdio")
+#   -pprof string
+#     	start a pprof http server (https://golang.org/pkg/net/http/pprof/) (default ":6060")
+#   -trace
+#     	print all requests and responses
+#   -usebinarypkgcache
+#     	use $GOPATH/pkg binary .a files (improves performance) (default true)
+#   -version
+#     	print version and exit
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _go-langserver() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-addr[server listen address (tcp) (default ":4389")]:addr' \
+    '-freeosmemory=[aggressively free memory back to the OS (default true)]:bool:(true false)' \
+    '-func-snippet-enabled=[enable argument snippets on func completion (default true)]:bool:(true false)' \
+    '-gocodecompletion[enable completion (extra memory burden)]' \
+    '-logfile[also log to this file (in addition to stderr)]:log file:_files' \
+    '-maxparallelism[use at max N parallel goroutines to fulfill requests (default -1)]:max parallelism' \
+    '-mode[communication mode (stdio|tcp) (default "stdio")]:mode:(stdio tcp)' \
+    '-pprof[start a pprof http server (https://golang.org/pkg/net/http/pprof/) (default ":6060")]:pprof addr' \
+    '-trace[print all requests and responses]' \
+    '-usebinarypkgcache[use $GOPATH/pkg binary .a files (improves performance) (default true)]:bool:(true false)' \
+    '-version[print version and exit]' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_go-langserver "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2
