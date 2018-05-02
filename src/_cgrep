@@ -1,9 +1,9 @@
-#compdef $BIN
+#compdef cgrep
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
 #
-# Copyright (c) 2018, Koichi Shiraishi
+# Copyright (c) 2017, Koichi Shiraishi
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -33,54 +33,34 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/google/codesearch/cmd/cgrep
+#
+# usage: cgrep [-c] [-h] [-i] [-l] [-n] regexp [file...]
+#
+# Cgrep behaves like grep, searching for regexp, an RE2 (nearly PCRE) regular expression.
+#
+# The -c, -h, -i, -l, and -n flags are as in grep, although note that as per Go's
+# flag parsing convention, they cannot be combined: the option pair -i -n
+# cannot be abbreviated to -in.
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _cgrep() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-c[only print a count of matching lines]' \
+    '-h[suppress printing of filenames]' \
+    '-i[case-insensitive]' \
+    '-l[output matching files names only]' \
+    '-n[prefix output with line numbers]' \
+    '*:filename:_files' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_cgrep "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

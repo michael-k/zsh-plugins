@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef gitstats git-stats
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,28 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/evilsocket/gitstats
+#
+# Usage of gitstats:
+#   -authors string
+#         Comma separated list of email addresses to filter commits with.
+#   -repo string
+#         Repository to analyze, can be a URL or a folder.
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _gitstats() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-authors[Comma separated list of email addresses to filter commits with.]:authors' \
+    '-repo[Repository to analyze, can be a URL or a folder.]:repository url|path:_files' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_gitstats "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

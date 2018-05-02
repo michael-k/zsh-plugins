@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef goderive
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,44 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/awalterschulze/goderive
+#
+# Usage of goderive:
+#   -autoname
+#     	rename functions that are conflicting with other functions
+#   -dedup
+#     	rename functions to functions that are duplicates
+#   -pluginprefix string
+#     	used to override function prefixes.  The input is a comma separated list of function are prefix pairs.  For example equal=deriveEqual,copyto=copyTo,fmap=fmap,
+#   -prefix string
+#     	prefix of all functions (default "derive")
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _goderive() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
+  _go_packages() {
+    local -a gopaths
+    gopaths=("${(s/:/)$(go env GOPATH)}")
+    for p in $gopaths; do
+      _alternative ':packages:_path_files -W "$p/src" -/'
+    done
+    _alternative '*:path:_files'
+  }
 
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-autoname[rename functions that are conflicting with other functions]' \
+    '-dedup[rename functions to functions that are duplicates]' \
+    '-pluginprefix[used to override function prefixes.  The input is a comma separated list of function are prefix pairs.]:pluginprefix (ex: equal=deriveEqual,copyto=copyTo,fmap=fmap)' \
+    '-prefix[prefix of all functions (default "derive")]:prefix name' \
+    '1: :_go_packages' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_goderive "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

@@ -1,4 +1,4 @@
-#compdef godep
+#compdef zoekt-git-index
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,78 +33,56 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/tools/godep
+# github.com/google/zoekt/cmd/zoekt-git-index
+#
+# Usage of zoekt-git-index:
+#   -allow_missing_branches
+#      allow missing branches.
+#   -branches string
+#      git branches to index. (default "HEAD")
+#   -file_limit int
+#      maximum file size (default 131072)
+#   -incremental
+#      only index changed repositories (default true)
+#   -index string
+#      index directory for *.zoekt files. (default "/Users/zchee/.zoekt")
+#   -parallelism int
+#      maximum number of parallel indexing processes. (default 4)
+#   -prefix string
+#      prefix for branch names (default "refs/heads/")
+#   -repo_cache string
+#      directory holding bare git repos, named by URL. this is used to find repositories for submodules. It also affects name if the indexed repository is under this directory.
+#   -require_ctags
+#      If set, ctags calls must succeed.
+#   -shard_limit int
+#      maximum corpus size for a shard (default 104857600)
+#   -submodules
+#      if set to false, do not recurse into submodules (default true)
 #
 # -----------------------------------------------------------------------------
 
-function _godep() {
+function _zoekt-git-index() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands _verbose_debug
-
-  commands=(
-  'save:list and copy dependencies into Godeps'
-  'go:run the go tool with saved dependencies'
-  'get:download and install packages with specified dependencies'
-  'path:print GOPATH for dependency code'
-  'restore:check out listed dependency versions in GOPATH'
-  'update:update selected packages or the go version'
-  'diff:shows the diff between current and previously saved set of dependencies'
-  'version:show version info'
-  'help:more information about a command'
-  )
-
-  _verbose_debug=(
-  '-v:verbose output is enabled'
-  '-d:debug output is enabled'
-  )
-
   _arguments -C \
-    "1: :{_describe 'godep command' commands}" \
-    '*:: :->args' \
+    '-allow_missing_branches[allow missing branches.]' \
+    '-branches[git branches to index. (default "HEAD")]:branch' \
+    '-file_limit[maximum file size (default 131072)]:filesize limit' \
+    '-incremental[only index changed repositories (default true)]' \
+    '-index[index directory for *.zoekt files. (default "/Users/zchee/.zoekt")]:index directory:_files' \
+    '-parallelism[maximum number of parallel indexing processes. (default 4)]:number of parallel' \
+    '-prefix[prefix for branch names (default "refs/heads/")]:prefix' \
+    '-repo_cache[directory holding bare git repos, named by URL]:repo' \
+    '-require_ctags[If set, ctags calls must succeed.]' \
+    '-shard_limit[maximum corpus size for a shard (default 104857600)]:shared limit' \
+    '-submodules[if set to false, do not recurse into submodules (default true)]' \
+    '*::path:_files' \
     && ret=0
-
-  case $state in
-    (args)
-      case $words[1] in
-        save)
-          _arguments \
-            '-r[import statements will be rewritten to refer directly to the copied source code]' \
-            '-t[test files (*_test.go files + testdata directories) are also saved]' \
-            ${_verbose_debug[@]} \
-            '*:file:_files' \
-            && ret=0
-          ;;
-        # TODO(zchee): Support go command completion
-        go)
-          ;;
-        get)
-          _arguments \
-            '-t[dependencies of test files are also downloaded and installed]' \
-            ${_verbose_debug[@]} \
-            && ret=0
-          ;;
-        (path|restore|diff|version)
-          _arguments \
-            ${_verbose_debug[@]} \
-            && ret=0
-          ;;
-        (update)
-          _arguments \
-            '-goversion[update the recorded go version]:go version' \
-            ${_verbose_debug[@]} \
-          ;;
-        help)
-          _arguments "1: :{_describe 'command' commands -- topics}" \
-            && ret=0
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_godep "$*"
+_zoekt-git-index "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

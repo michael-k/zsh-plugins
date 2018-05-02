@@ -1,4 +1,4 @@
-#compdef $BIN
+#compdef kubeval
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
@@ -33,54 +33,42 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# github.com/garethr/kubeval
+#
+# Validate a Kubernetes YAML file against the relevant schema
+#
+# Usage:
+#   kubeval <file> [file...] [flags]
+#
+# Flags:
+#   -f, --filename string             filename to be displayed when testing manifests read from stdin (default "stdin")
+#   -h, --help                        help for kubeval
+#   -v, --kubernetes-version string   Version of Kubernetes to validate against (default "master")
+#       --openshift                   Use OpenShift schemas instead of upstream Kubernetes
+#       --schema-location string      Base URL used to download schemas. Can also be specified with the environment variable KUBEVAL_SCHEMA_LOCATION (default "https://raw.githubusercontent.com/garethr")
+#       --strict                      Disallow additional properties not in schema
+#       --version                     Display the kubeval version information and exit
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _kubeval() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
-
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    {-f,--filename}'[filename to be displayed when testing manifests read from stdin (default "stdin")]:filename:_files' \
+    {-h,--help}'[help for kubeval]' \
+    {-v,--kubernetes-version}'[Version of Kubernetes to validate against (default "master")]:version' \
+    '--openshift[Use OpenShift schemas instead of upstream Kubernetes]' \
+    '--schema-location[Base URL used to download schemas. Can also be specified with the environment variable KUBEVAL_SCHEMA_LOCATION (default "https://raw.githubusercontent.com/garethr")]' \
+    '--strict[Disallow additional properties not in schema]' \
+    '--version[Display the kubeval version information and exit]' \
+    '*:yaml files:_files' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_kubeval "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2

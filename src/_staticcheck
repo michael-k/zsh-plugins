@@ -1,9 +1,9 @@
-#compdef $BIN
+#compdef staticcheck
 
 # -----------------------------------------------------------------------------
 # The BSD-3-Clause License
 #
-# Copyright (c) 2018, Koichi Shiraishi
+# Copyright (c) 2016, Koichi Shiraishi
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -33,54 +33,58 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 #
-# github.com/foo/bar
+# honnef.co/go/tools/cmd/staticcheck
+#
+# Usage of staticcheck:
+#         staticcheck [flags] # runs on package in current directory
+#         staticcheck [flags] packages
+#         staticcheck [flags] directory
+#         staticcheck [flags] files... # must be a single package
+# Flags:
+#   -generated
+#         Check generated code
+#   -go version
+#         Target Go version in the format '1.x' (default 1.9)
+#   -ignore string
+#         Space separated list of checks to ignore, in the following format: 'import/path/file.go:Check1,Check2,...' Both the import path and file name sections support globbing, e.g. 'os/exec/*_test.go'
+#   -min_confidence float
+#         Deprecated; use -ignore instead
+#   -tags build tags
+#         List of build tags
+#   -tests
+#         Include tests (default true)
 #
 # -----------------------------------------------------------------------------
 
-function _$BIN() {
+function _staticcheck() {
   local context curcontext=$curcontext state line ret=1
   declare -A opt_args
 
-  local -a commands
-  commands=(
-  'subcommand1:description1'
-  'subcommand2:description2'
-  'subcommand3:description3'
-  )
+  __go_packages() {
+    local gopaths
+    declare -a gopaths
+    gopaths=("${(s/:/)$(go env GOPATH)}")
+    for p in $gopaths; do
+      _alternative ':go packages:_path_files -W "$p/src" -/'
+    done
+  }
+
+  _alternative ':go packages:__go_packages'
+  _alternative ':directory:_path_files -W -/'
+  _alternative ':go files:_path_files -g "*.go"'
 
   _arguments -C \
-    "1: :{_describe '$BIN command' commands}" \
-    '*:: :->args' \
+    '-generated[Check generated code]' \
+    "-go[Target Go version in the format '1.x' (default 1.9)]:go version]" \
+    "-ignore[Space separated list of checks to ignore]:ignore pattern (example\: import/path/file.go:Check1,Check2,... | 'os/exec/*_test.go')]" \
+    '-min_confidence[Deprecated; use -ignore instead]:confidence level' \
+    '-tags[List of build tags]:tag' \
+    '-tests[Include tests (default true)]' \
     && ret=0
-
-  case $state in
-    (args)
-      if (( CURRENT == 2 )); then
-        _arguments '*:after the (( CURRENT == 2 )) comment:'
-        return
-      fi
-      _arguments '*:before the (( CURRENT == 2 )) comment:_files'
-      ;;
-
-      case $words[1] in
-        subcommand1)
-          _arguments \
-            '-foo[subcommand2 -foo argument comment]'
-            '*:file:_files'
-          ;;
-        subcommand2)
-          _arguments \
-            '-bar[subcommand2 -bar argument comment]' \
-            '-baz[subcommand2 -baz argument comment]'
-            '*:devices:_devices'
-          ;;
-      esac
-      ;;
-  esac
 
   return ret
 }
 
-_$BIN "$*"
+_staticcheck "$*"
 
 # vim:ft=zsh:et:sts=2:sw=2
