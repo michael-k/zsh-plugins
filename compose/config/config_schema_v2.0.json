@@ -41,6 +41,7 @@
     }
   },
 
+  "patternProperties": {"^x-": {}},
   "additionalProperties": false,
 
   "definitions": {
@@ -50,6 +51,33 @@
       "type": "object",
 
       "properties": {
+        "blkio_config": {
+          "type": "object",
+          "properties": {
+            "device_read_bps": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/blkio_limit"}
+            },
+            "device_read_iops": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/blkio_limit"}
+            },
+            "device_write_bps": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/blkio_limit"}
+            },
+            "device_write_iops": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/blkio_limit"}
+            },
+            "weight": {"type": "integer"},
+            "weight_device": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/blkio_weight"}
+            }
+          },
+          "additionalProperties": false
+        },
         "build": {
           "oneOf": [
             {"type": "string"},
@@ -80,6 +108,13 @@
         "depends_on": {"$ref": "#/definitions/list_of_strings"},
         "devices": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "dns": {"$ref": "#/definitions/string_or_list"},
+        "dns_opt": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
         "dns_search": {"$ref": "#/definitions/string_or_list"},
         "domainname": {"type": "string"},
         "entrypoint": {
@@ -123,7 +158,7 @@
         "hostname": {"type": "string"},
         "image": {"type": "string"},
         "ipc": {"type": "string"},
-        "labels": {"$ref": "#/definitions/list_or_dict"},
+        "labels": {"$ref": "#/definitions/labels"},
         "links": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
 
         "logging": {
@@ -138,8 +173,9 @@
 
         "mac_address": {"type": "string"},
         "mem_limit": {"type": ["number", "string"]},
-        "memswap_limit": {"type": ["number", "string"]},
+        "mem_reservation": {"type": ["string", "integer"]},
         "mem_swappiness": {"type": "integer"},
+        "memswap_limit": {"type": ["number", "string"]},
         "network_mode": {"type": "string"},
 
         "networks": {
@@ -155,7 +191,8 @@
                       "properties": {
                         "aliases": {"$ref": "#/definitions/list_of_strings"},
                         "ipv4_address": {"type": "string"},
-                        "ipv6_address": {"type": "string"}
+                        "ipv6_address": {"type": "string"},
+                        "priority": {"type": "number"}
                       },
                       "additionalProperties": false
                     },
@@ -244,7 +281,15 @@
             "properties": {
                 "driver": {"type": "string"},
                 "config": {
-                    "type": "array"
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/ipam_config"}
+                },
+                "options": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^.+$": {"type": "string"}
+                  },
+                  "additionalProperties": false
                 }
             },
             "additionalProperties": false
@@ -257,6 +302,24 @@
           "additionalProperties": false
         },
         "internal": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+
+    "ipam_config": {
+      "id": "#/definitions/ipam_config",
+      "type": "object",
+      "properties": {
+        "subnet": {"type": "string"},
+        "iprange": {"type": "string"},
+        "gateway": {"type": "string"},
+        "aux_addresses": {
+          "type": "object",
+          "patternProperties": {
+            "^.+$": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -309,6 +372,38 @@
         },
         {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       ]
+    },
+
+    "labels": {
+      "oneOf": [
+        {
+          "type": "object",
+          "patternProperties": {
+            ".+": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      ]
+    },
+
+    "blkio_limit": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string"},
+        "rate": {"type": ["integer", "string"]}
+      },
+      "additionalProperties": false
+    },
+    "blkio_weight": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string"},
+        "weight": {"type": "integer"}
+      },
+      "additionalProperties": false
     },
 
     "constraints": {

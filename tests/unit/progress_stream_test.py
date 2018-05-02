@@ -1,5 +1,12 @@
+# ~*~ encoding: utf-8 ~*~
 from __future__ import absolute_import
 from __future__ import unicode_literals
+
+import io
+import os
+import random
+import shutil
+import tempfile
 
 from six import StringIO
 
@@ -15,7 +22,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'"progress": "..."}',
         ]
         events = progress_stream.stream_output(output, StringIO())
-        self.assertEqual(len(events), 1)
+        assert len(events) == 1
 
     def test_stream_output_div_zero(self):
         output = [
@@ -24,7 +31,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'"progress": "..."}',
         ]
         events = progress_stream.stream_output(output, StringIO())
-        self.assertEqual(len(events), 1)
+        assert len(events) == 1
 
     def test_stream_output_null_total(self):
         output = [
@@ -33,7 +40,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'"progress": "..."}',
         ]
         events = progress_stream.stream_output(output, StringIO())
-        self.assertEqual(len(events), 1)
+        assert len(events) == 1
 
     def test_stream_output_progress_event_tty(self):
         events = [
@@ -46,7 +53,7 @@ class ProgressStreamTestCase(unittest.TestCase):
 
         output = TTYStringIO()
         events = progress_stream.stream_output(events, output)
-        self.assertTrue(len(output.getvalue()) > 0)
+        assert len(output.getvalue()) > 0
 
     def test_stream_output_progress_event_no_tty(self):
         events = [
@@ -55,7 +62,7 @@ class ProgressStreamTestCase(unittest.TestCase):
         output = StringIO()
 
         events = progress_stream.stream_output(events, output)
-        self.assertEqual(len(output.getvalue()), 0)
+        assert len(output.getvalue()) == 0
 
     def test_stream_output_no_progress_event_no_tty(self):
         events = [
@@ -64,7 +71,31 @@ class ProgressStreamTestCase(unittest.TestCase):
         output = StringIO()
 
         events = progress_stream.stream_output(events, output)
-        self.assertTrue(len(output.getvalue()) > 0)
+        assert len(output.getvalue()) > 0
+
+    def test_mismatched_encoding_stream_write(self):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, True)
+
+        def mktempfile(encoding):
+            fname = os.path.join(tmpdir, hex(random.getrandbits(128))[2:-1])
+            return io.open(fname, mode='w+', encoding=encoding)
+
+        text = '就吃饭'
+        with mktempfile(encoding='utf-8') as tf:
+            progress_stream.write_to_stream(text, tf)
+            tf.seek(0)
+            assert tf.read() == text
+
+        with mktempfile(encoding='utf-32') as tf:
+            progress_stream.write_to_stream(text, tf)
+            tf.seek(0)
+            assert tf.read() == text
+
+        with mktempfile(encoding='ascii') as tf:
+            progress_stream.write_to_stream(text, tf)
+            tf.seek(0)
+            assert tf.read() == '???'
 
 
 def test_get_digest_from_push():

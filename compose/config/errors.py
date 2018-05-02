@@ -4,8 +4,8 @@ from __future__ import unicode_literals
 
 VERSION_EXPLANATION = (
     'You might be seeing this error because you\'re using the wrong Compose file version. '
-    'Either specify a supported version ("2.0", "2.1", "3.0") and place your '
-    'service definitions under the `services` key, or omit the `version` key '
+    'Either specify a supported version (e.g "2.2" or "3.3") and place '
+    'your service definitions under the `services` key, or omit the `version` key '
     'and place your service definitions at the root of the file to use '
     'version 1.\nFor more on the Compose file format versions, see '
     'https://docs.docker.com/compose/compose-file/')
@@ -44,3 +44,12 @@ class ComposeFileNotFound(ConfigurationError):
 
         Supported filenames: %s
         """ % ", ".join(supported_filenames))
+
+
+class DuplicateOverrideFileFound(ConfigurationError):
+    def __init__(self, override_filenames):
+        self.override_filenames = override_filenames
+        super(DuplicateOverrideFileFound, self).__init__(
+            "Multiple override files found: {}. You may only use a single "
+            "override file.".format(", ".join(override_filenames))
+        )

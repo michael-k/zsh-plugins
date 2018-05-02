@@ -4,21 +4,31 @@ from __future__ import unicode_literals
 import functools
 import os
 
+import pytest
+from docker.errors import APIError
 from docker.utils import version_lt
-from pytest import skip
 
 from .. import unittest
 from compose.cli.docker_client import docker_client
 from compose.config.config import resolve_environment
-from compose.config.config import V1
-from compose.config.config import V2_0
-from compose.config.config import V2_1
-from compose.config.config import V3_0
 from compose.config.environment import Environment
 from compose.const import API_VERSIONS
+from compose.const import COMPOSEFILE_V1 as V1
+from compose.const import COMPOSEFILE_V2_0 as V2_0
+from compose.const import COMPOSEFILE_V2_0 as V2_1
+from compose.const import COMPOSEFILE_V2_2 as V2_2
+from compose.const import COMPOSEFILE_V2_3 as V2_3
+from compose.const import COMPOSEFILE_V3_0 as V3_0
+from compose.const import COMPOSEFILE_V3_2 as V3_2
+from compose.const import COMPOSEFILE_V3_5 as V3_5
 from compose.const import LABEL_PROJECT
 from compose.progress_stream import stream_output
 from compose.service import Service
+
+SWARM_SKIP_CONTAINERS_ALL = os.environ.get('SWARM_SKIP_CONTAINERS_ALL', '0') != '0'
+SWARM_SKIP_CPU_SHARES = os.environ.get('SWARM_SKIP_CPU_SHARES', '0') != '0'
+SWARM_SKIP_RM_VOLUMES = os.environ.get('SWARM_SKIP_RM_VOLUMES', '0') != '0'
+SWARM_ASSUME_MULTINODE = os.environ.get('SWARM_ASSUME_MULTINODE', '0') != '0'
 
 
 def pull_busybox(client):
@@ -37,7 +47,7 @@ def get_links(container):
 
 def engine_max_version():
     if 'DOCKER_VERSION' not in os.environ:
-        return V3_0
+        return V3_5
     version = os.environ['DOCKER_VERSION'].partition('-')[0]
     if version_lt(version, '1.10'):
         return V1
@@ -45,33 +55,36 @@ def engine_max_version():
         return V2_0
     if version_lt(version, '1.13'):
         return V2_1
-    return V3_0
+    if version_lt(version, '17.06'):
+        return V3_2
+    return V3_5
 
 
-def build_version_required_decorator(ignored_versions):
-    def decorator(f):
-        @functools.wraps(f)
-        def wrapper(self, *args, **kwargs):
-            max_version = engine_max_version()
-            if max_version in ignored_versions:
-                skip("Engine version %s is too low" % max_version)
-                return
-            return f(self, *args, **kwargs)
-        return wrapper
-
-    return decorator
+def min_version_skip(version):
+    return pytest.mark.skipif(
+        engine_max_version() < version,
+        reason="Engine version %s is too low" % version
+    )
 
 
 def v2_only():
-    return build_version_required_decorator((V1,))
+    return min_version_skip(V2_0)
 
 
 def v2_1_only():
-    return build_version_required_decorator((V1, V2_0))
+    return min_version_skip(V2_1)
+
+
+def v2_2_only():
+    return min_version_skip(V2_2)
+
+
+def v2_3_only():
+    return min_version_skip(V2_3)
 
 
 def v3_only():
-    return build_version_required_decorator((V1, V2_0, V2_1))
+    return min_version_skip(V3_0)
 
 
 class DockerClientTestCase(unittest.TestCase):
@@ -92,7 +105,11 @@ class DockerClientTestCase(unittest.TestCase):
 
         for i in self.client.images(
                 filters={'label': 'com.docker.compose.test_image'}):
-            self.client.remove_image(i)
+            try:
+                self.client.remove_image(i, force=True)
+            except APIError as e:
+                if e.is_server_error():
+                    pass
 
         volumes = self.client.volumes().get('Volumes') or []
         for v in volumes:
@@ -127,4 +144,56 @@ class DockerClientTestCase(unittest.TestCase):
     def require_api_version(self, minimum):
         api_version = self.client.version()['ApiVersion']
         if version_lt(api_version, minimum):
-            skip("API version is too low ({} < {})".format(api_version, minimum))
+            pytest.skip("API version is too low ({} < {})".format(api_version, minimum))
+
+    def get_volume_data(self, volume_name):
+        if not is_cluster(self.client):
+            return self.client.inspect_volume(volume_name)
+
+        volumes = self.client.volumes(filters={'name': volume_name})['Volumes']
+        assert len(volumes) > 0
+        return self.client.inspect_volume(volumes[0]['Name'])
+
+
+def if_runtime_available(runtime):
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(self, *args, **kwargs):
+            if runtime not in self.client.info().get('Runtimes', {}):
+                return pytest.skip("This daemon does not support the '{}'' runtime".format(runtime))
+            return f(self, *args, **kwargs)
+        return wrapper
+
+    return decorator
+
+
+def is_cluster(client):
+    if SWARM_ASSUME_MULTINODE:
+        return True
+
+    def get_nodes_number():
+        try:
+            return len(client.nodes())
+        except APIError:
+            # If the Engine is not part of a Swarm, the SDK will raise
+            # an APIError
+            return 0
+
+    if not hasattr(is_cluster, 'nodes') or is_cluster.nodes is None:
+        # Only make the API call if the value hasn't been cached yet
+        is_cluster.nodes = get_nodes_number()
+
+    return is_cluster.nodes > 1
+
+
+def no_cluster(reason):
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(self, *args, **kwargs):
+            if is_cluster(self.client):
+                pytest.skip("Test will not be run in cluster mode: %s" % reason)
+                return
+            return f(self, *args, **kwargs)
+        return wrapper
+
+    return decorator

@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import unicode_literals
 
+import math
 import os
 import platform
 import ssl
@@ -9,6 +10,7 @@ import subprocess
 import sys
 
 import docker
+import six
 
 import compose
 from ..const import IS_WINDOWS_PLATFORM
@@ -129,9 +131,25 @@ def generate_user_agent():
     return " ".join(parts)
 
 
-def unquote_path(s):
-    if not s:
+def human_readable_file_size(size):
+    suffixes = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', ]
+    order = int(math.log(size, 2) / 10) if size else 0
+    if order >= len(suffixes):
+        order = len(suffixes) - 1
+
+    return '{0:.3g} {1}'.format(
+        size / float(1 << (order * 10)),
+        suffixes[order]
+    )
+
+
+def binarystr_to_unicode(s):
+    if not isinstance(s, six.binary_type):
         return s
-    if s[0] == '"' and s[-1] == '"':
-        return s[1:-1]
-    return s
+
+    if IS_WINDOWS_PLATFORM:
+        try:
+            return s.decode('windows-1250')
+        except UnicodeDecodeError:
+            pass
+    return s.decode('utf-8', 'replace')
