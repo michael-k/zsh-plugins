@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 
 import argparse
 import os
+import shutil
 import sys
 import time
 from distutils.core import run_setup
@@ -27,6 +28,8 @@ from release.utils import ScriptError
 from release.utils import update_init_py_version
 from release.utils import update_run_sh_version
 from release.utils import yesno
+from requests.exceptions import HTTPError
+from twine.commands.upload import main as twine_upload
 
 
 def create_initial_branch(repository, args):
@@ -78,10 +81,9 @@ def monitor_pr_status(pr_data):
                     continue
                 summary[detail.state] += 1
             print('{pending} pending, {success} successes, {failure} failures'.format(**summary))
-            if status.total_count == 0:
-                # Mostly for testing purposes against repos with no CI setup
-                return True
-            elif summary['pending'] == 0 and summary['failure'] == 0:
+            if summary['pending'] == 0 and summary['failure'] == 0 and summary['success'] > 0:
+                # This check assumes at least 1 non-DCO CI check to avoid race conditions.
+                # If testing on a repo without CI, use --skip-ci-check to avoid looping eternally
                 return True
             elif summary['failure'] > 0:
                 raise ScriptError('CI failures detected!')
@@ -125,13 +127,60 @@ def print_final_instructions(args):
         "You're almost done! Please verify that everything is in order and "
         "you are ready to make the release public, then run the following "
         "command:\n{exe} -b {user} finalize {version}".format(
-            exe=sys.argv[0], user=args.bintray_user, version=args.release
+            exe='./script/release/release.sh', user=args.bintray_user, version=args.release
         )
     )
 
 
+def distclean():
+    print('Running distclean...')
+    dirs = [
+        os.path.join(REPO_ROOT, 'build'), os.path.join(REPO_ROOT, 'dist'),
+        os.path.join(REPO_ROOT, 'docker-compose.egg-info')
+    ]
+    files = []
+    for base, dirnames, fnames in os.walk(REPO_ROOT):
+        for fname in fnames:
+            path = os.path.normpath(os.path.join(base, fname))
+            if fname.endswith('.pyc'):
+                files.append(path)
+            elif fname.startswith('.coverage.'):
+                files.append(path)
+        for dirname in dirnames:
+            path = os.path.normpath(os.path.join(base, dirname))
+            if dirname == '__pycache__':
+                dirs.append(path)
+            elif dirname == '.coverage-binfiles':
+                dirs.append(path)
+
+    for file in files:
+        os.unlink(file)
+
+    for folder in dirs:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def pypi_upload(args):
+    print('Uploading to PyPi')
+    try:
+        twine_upload([
+            'dist/docker_compose-{}*.whl'.format(args.release),
+            'dist/docker-compose-{}*.tar.gz'.format(args.release)
+        ])
+    except HTTPError as e:
+        if e.response.status_code == 400 and 'File already exists' in e.message:
+            if not args.finalize_resume:
+                raise ScriptError(
+                    'Package already uploaded on PyPi.'
+                )
+            print('Skipping PyPi upload - package already uploaded')
+        else:
+            raise ScriptError('Unexpected HTTP error uploading package to PyPi: {}'.format(e))
+
+
 def resume(args):
     try:
+        distclean()
         repository = Repository(REPO_ROOT, args.repo)
         br_name = branch_name(args.release)
         if not repository.branch_exists(br_name):
@@ -156,7 +205,8 @@ def resume(args):
         if not pr_data:
             pr_data = repository.create_release_pull_request(args.release)
         check_pr_mergeable(pr_data)
-        monitor_pr_status(pr_data)
+        if not args.skip_ci:
+            monitor_pr_status(pr_data)
         downloader = BinaryDownloader(args.destination)
         files = downloader.download_all(args.release)
         if not gh_release:
@@ -182,6 +232,7 @@ def cancel(args):
         bintray_api = BintrayAPI(os.environ['BINTRAY_TOKEN'], args.bintray_user)
         print('Removing Bintray data repository for {}'.format(args.release))
         bintray_api.delete_repository(args.bintray_org, branch_name(args.release))
+        distclean()
     except ScriptError as e:
         print(e)
         return 1
@@ -190,12 +241,14 @@ def cancel(args):
 
 
 def start(args):
+    distclean()
     try:
         repository = Repository(REPO_ROOT, args.repo)
         create_initial_branch(repository, args)
         pr_data = repository.create_release_pull_request(args.release)
         check_pr_mergeable(pr_data)
-        monitor_pr_status(pr_data)
+        if not args.skip_ci:
+            monitor_pr_status(pr_data)
         downloader = BinaryDownloader(args.destination)
         files = downloader.download_all(args.release)
         gh_release = create_release_draft(repository, args.release, pr_data, files)
@@ -211,6 +264,7 @@ def start(args):
 
 
 def finalize(args):
+    distclean()
     try:
         repository = Repository(REPO_ROOT, args.repo)
         img_manager = ImageManager(args.release)
@@ -236,11 +290,14 @@ def finalize(args):
         run_setup(os.path.join(REPO_ROOT, 'setup.py'), script_args=['sdist', 'bdist_wheel'])
 
         merge_status = pr_data.merge()
-        if not merge_status.merged:
-            raise ScriptError('Unable to merge PR #{}: {}'.format(pr_data.number, merge_status.message))
-        print('Uploading to PyPi')
-        run_setup(os.path.join(REPO_ROOT, 'setup.py'), script_args=['upload'])
-        img_manager.push_images(args.release)
+        if not merge_status.merged and not args.finalize_resume:
+            raise ScriptError(
+                'Unable to merge PR #{}: {}'.format(pr_data.number, merge_status.message)
+            )
+
+        pypi_upload(args)
+
+        img_manager.push_images()
         repository.publish_release(gh_release)
     except ScriptError as e:
         print(e)
@@ -258,13 +315,13 @@ ACTIONS = [
 
 EPILOG = '''Example uses:
     * Start a new feature release (includes all changes currently in master)
-        release.py -b user start 1.23.0
+        release.sh -b user start 1.23.0
     * Start a new patch release
-        release.py -b user --patch 1.21.0 start 1.21.1
+        release.sh -b user --patch 1.21.0 start 1.21.1
     * Cancel / rollback an existing release draft
-        release.py -b user cancel 1.23.0
+        release.sh -b user cancel 1.23.0
     * Restart a previously aborted patch release
-        release.py -b user -p 1.21.0 resume 1.21.1
+        release.sh -b user -p 1.21.0 resume 1.21.1
 '''
 
 
@@ -309,6 +366,14 @@ def main():
     parser.add_argument(
         '--no-cherries', '-C', dest='cherries', action='store_false',
         help='If set, the program will not prompt the user for PR numbers to cherry-pick'
+    )
+    parser.add_argument(
+        '--skip-ci-checks', dest='skip_ci', action='store_true',
+        help='If set, the program will not wait for CI jobs to complete'
+    )
+    parser.add_argument(
+        '--finalize-resume', dest='finalize_resume', action='store_true',
+        help='If set, finalize will continue through steps that have already been completed.'
     )
     args = parser.parse_args()
 
