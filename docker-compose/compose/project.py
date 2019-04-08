@@ -10,13 +10,13 @@ from functools import reduce
 import enum
 import six
 from docker.errors import APIError
+from docker.utils import version_lt
 
 from . import parallel
 from .config import ConfigurationError
 from .config.config import V1
 from .config.sort_services import get_container_name_from_network_mode
 from .config.sort_services import get_service_name_from_network_mode
-from .const import IMAGE_EVENTS
 from .const import LABEL_ONE_OFF
 from .const import LABEL_PROJECT
 from .const import LABEL_SERVICE
@@ -29,12 +29,13 @@ from .service import ContainerNetworkMode
 from .service import ContainerPidMode
 from .service import ConvergenceStrategy
 from .service import NetworkMode
+from .service import parse_repository_tag
 from .service import PidMode
 from .service import Service
-from .service import ServiceName
 from .service import ServiceNetworkMode
 from .service import ServicePidMode
 from .utils import microseconds_from_time_nano
+from .utils import truncate_string
 from .volume import ProjectVolumes
 
 
@@ -198,25 +199,6 @@ class Project(object):
             service.remove_duplicate_containers()
         return services
 
-    def get_scaled_services(self, services, scale_override):
-        """
-        Returns a list of this project's services as scaled ServiceName objects.
-
-        services: a list of Service objects
-        scale_override: a dict with the scale to apply to each service (k: service_name, v: scale)
-        """
-        service_names = []
-        for service in services:
-            if service.name in scale_override:
-                scale = scale_override[service.name]
-            else:
-                scale = service.scale_num
-
-            for i in range(1, scale + 1):
-                service_names.append(ServiceName(self.name, service.name, i))
-
-        return service_names
-
     def get_links(self, service_dict):
         links = []
         if 'links' in service_dict:
@@ -298,6 +280,7 @@ class Project(object):
             operator.attrgetter('name'),
             'Starting',
             get_deps,
+            fail_check=lambda obj: not obj.containers(),
         )
 
         return containers
@@ -372,12 +355,35 @@ class Project(object):
         return containers
 
     def build(self, service_names=None, no_cache=False, pull=False, force_rm=False, memory=None,
-              build_args=None, gzip=False):
+              build_args=None, gzip=False, parallel_build=False):
+
+        services = []
         for service in self.get_services(service_names):
             if service.can_be_built():
-                service.build(no_cache, pull, force_rm, memory, build_args, gzip)
+                services.append(service)
             else:
                 log.info('%s uses an image, skipping' % service.name)
+
+        def build_service(service):
+            service.build(no_cache, pull, force_rm, memory, build_args, gzip)
+
+        if parallel_build:
+            _, errors = parallel.parallel_execute(
+                services,
+                build_service,
+                operator.attrgetter('name'),
+                'Building',
+                limit=5,
+            )
+            if len(errors):
+                combined_errors = '\n'.join([
+                    e.decode('utf-8') if isinstance(e, six.binary_type) else e for e in errors.values()
+                ])
+                raise ProjectError(combined_errors)
+
+        else:
+            for service in services:
+                build_service(service)
 
     def create(
         self,
@@ -397,11 +403,13 @@ class Project(object):
                 detached=True,
                 start=False)
 
-    def events(self, service_names=None):
+    def _legacy_event_processor(self, service_names):
+        # Only for v1 files or when Compose is forced to use an older API version
         def build_container_event(event, container):
             time = datetime.datetime.fromtimestamp(event['time'])
             time = time.replace(
-                microsecond=microseconds_from_time_nano(event['timeNano']))
+                microsecond=microseconds_from_time_nano(event['timeNano'])
+            )
             return {
                 'time': time,
                 'type': 'container',
@@ -420,23 +428,71 @@ class Project(object):
             filters={'label': self.labels()},
             decode=True
         ):
-            # The first part of this condition is a guard against some events
-            # broadcasted by swarm that don't have a status field.
+            # This is a guard against some events broadcasted by swarm that
+            # don't have a status field.
             # See https://github.com/docker/compose/issues/3316
-            if 'status' not in event or event['status'] in IMAGE_EVENTS:
-                # We don't receive any image events because labels aren't applied
-                # to images
+            if 'status' not in event:
                 continue
 
-            # TODO: get labels from the API v1.22 , see github issue 2618
             try:
-                # this can fail if the container has been removed
+                # this can fail if the container has been removed or if the event
+                # refers to an image
                 container = Container.from_id(self.client, event['id'])
             except APIError:
                 continue
             if container.service not in service_names:
                 continue
             yield build_container_event(event, container)
+
+    def events(self, service_names=None):
+        if version_lt(self.client.api_version, '1.22'):
+            # New, better event API was introduced in 1.22.
+            return self._legacy_event_processor(service_names)
+
+        def build_container_event(event):
+            container_attrs = event['Actor']['Attributes']
+            time = datetime.datetime.fromtimestamp(event['time'])
+            time = time.replace(
+                microsecond=microseconds_from_time_nano(event['timeNano'])
+            )
+
+            container = None
+            try:
+                container = Container.from_id(self.client, event['id'])
+            except APIError:
+                # Container may have been removed (e.g. if this is a destroy event)
+                pass
+
+            return {
+                'time': time,
+                'type': 'container',
+                'action': event['status'],
+                'id': event['Actor']['ID'],
+                'service': container_attrs.get(LABEL_SERVICE),
+                'attributes': dict([
+                    (k, v) for k, v in container_attrs.items()
+                    if not k.startswith('com.docker.compose.')
+                ]),
+                'container': container,
+            }
+
+        def yield_loop(service_names):
+            for event in self.client.events(
+                filters={'label': self.labels()},
+                decode=True
+            ):
+                # TODO: support other event types
+                if event.get('Type') != 'container':
+                    continue
+
+                try:
+                    if event['Actor']['Attributes'][LABEL_SERVICE] not in service_names:
+                        continue
+                except KeyError:
+                    continue
+                yield build_container_event(event)
+
+        return yield_loop(set(service_names) if service_names else self.service_names)
 
     def up(self,
            service_names=None,
@@ -471,7 +527,6 @@ class Project(object):
             svc.ensure_image_exists(do_build=do_build, silent=silent)
         plans = self._get_convergence_plans(
             services, strategy, always_recreate_deps=always_recreate_deps)
-        scaled_services = self.get_scaled_services(services, scale_override)
 
         def do(service):
 
@@ -482,7 +537,6 @@ class Project(object):
                 scale_override=scale_override.get(service.name),
                 rescale=rescale,
                 start=start,
-                project_services=scaled_services,
                 reset_container_image=reset_container_image,
                 renew_anonymous_volumes=renew_anonymous_volumes,
             )
@@ -548,16 +602,35 @@ class Project(object):
     def pull(self, service_names=None, ignore_pull_failures=False, parallel_pull=False, silent=False,
              include_deps=False):
         services = self.get_services(service_names, include_deps)
+        msg = not silent and 'Pulling' or None
 
         if parallel_pull:
             def pull_service(service):
-                service.pull(ignore_pull_failures, True)
+                strm = service.pull(ignore_pull_failures, True, stream=True)
+                if strm is None:  # Attempting to pull service with no `image` key is a no-op
+                    return
+
+                writer = parallel.get_stream_writer()
+
+                for event in strm:
+                    if 'status' not in event:
+                        continue
+                    status = event['status'].lower()
+                    if 'progressDetail' in event:
+                        detail = event['progressDetail']
+                        if 'current' in detail and 'total' in detail:
+                            percentage = float(detail['current']) / float(detail['total'])
+                            status = '{} ({:.1%})'.format(status, percentage)
+
+                    writer.write(
+                        msg, service.name, truncate_string(status), lambda s: s
+                    )
 
             _, errors = parallel.parallel_execute(
                 services,
                 pull_service,
                 operator.attrgetter('name'),
-                not silent and 'Pulling' or None,
+                msg,
                 limit=5,
             )
             if len(errors):
@@ -571,8 +644,15 @@ class Project(object):
                 service.pull(ignore_pull_failures, silent=silent)
 
     def push(self, service_names=None, ignore_push_failures=False):
+        unique_images = set()
         for service in self.get_services(service_names, include_deps=False):
-            service.push(ignore_push_failures)
+            # Considering <image> and <image:latest> as the same
+            repo, tag, sep = parse_repository_tag(service.image_name)
+            service_image_name = sep.join((repo, tag)) if tag else sep.join((repo, 'latest'))
+
+            if service_image_name not in unique_images:
+                service.push(ignore_push_failures)
+                unique_images.add(service_image_name)
 
     def _labeled_containers(self, stopped=False, one_off=OneOffFilter.exclude):
         ctnrs = list(filter(None, [

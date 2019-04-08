@@ -7,9 +7,7 @@ import os
 import shutil
 import sys
 import time
-from distutils.core import run_setup
 
-import pypandoc
 from jinja2 import Template
 from release.bintray import BintrayAPI
 from release.const import BINTRAY_ORG
@@ -17,6 +15,8 @@ from release.const import NAME
 from release.const import REPO_ROOT
 from release.downloader import BinaryDownloader
 from release.images import ImageManager
+from release.pypi import check_pypirc
+from release.pypi import pypi_upload
 from release.repository import delete_assets
 from release.repository import get_contributors
 from release.repository import Repository
@@ -28,8 +28,6 @@ from release.utils import ScriptError
 from release.utils import update_init_py_version
 from release.utils import update_run_sh_version
 from release.utils import yesno
-from requests.exceptions import HTTPError
-from twine.commands.upload import main as twine_upload
 
 
 def create_initial_branch(repository, args):
@@ -60,8 +58,11 @@ def create_bump_commit(repository, release_branch, bintray_user, bintray_org):
     repository.push_branch_to_remote(release_branch)
 
     bintray_api = BintrayAPI(os.environ['BINTRAY_TOKEN'], bintray_user)
-    print('Creating data repository {} on bintray'.format(release_branch.name))
-    bintray_api.create_repository(bintray_org, release_branch.name, 'generic')
+    if not bintray_api.repository_exists(bintray_org, release_branch.name):
+        print('Creating data repository {} on bintray'.format(release_branch.name))
+        bintray_api.create_repository(bintray_org, release_branch.name, 'generic')
+    else:
+        print('Bintray repository {} already exists. Skipping'.format(release_branch.name))
 
 
 def monitor_pr_status(pr_data):
@@ -74,19 +75,24 @@ def monitor_pr_status(pr_data):
                 'pending': 0,
                 'success': 0,
                 'failure': 0,
+                'error': 0,
             }
             for detail in status.statuses:
                 if detail.context == 'dco-signed':
                     # dco-signed check breaks on merge remote-tracking ; ignore it
                     continue
-                summary[detail.state] += 1
-            print('{pending} pending, {success} successes, {failure} failures'.format(**summary))
-            if summary['pending'] == 0 and summary['failure'] == 0 and summary['success'] > 0:
+                if detail.state in summary:
+                    summary[detail.state] += 1
+            print(
+                '{pending} pending, {success} successes, {failure} failures, '
+                '{error} errors'.format(**summary)
+            )
+            if summary['failure'] > 0 or summary['error'] > 0:
+                raise ScriptError('CI failures detected!')
+            elif summary['pending'] == 0 and summary['success'] > 0:
                 # This check assumes at least 1 non-DCO CI check to avoid race conditions.
                 # If testing on a repo without CI, use --skip-ci-check to avoid looping eternally
                 return True
-            elif summary['failure'] > 0:
-                raise ScriptError('CI failures detected!')
             time.sleep(30)
         elif status.state == 'success':
             print('{} successes: all clear!'.format(status.total_count))
@@ -94,12 +100,14 @@ def monitor_pr_status(pr_data):
 
 
 def check_pr_mergeable(pr_data):
-    if not pr_data.mergeable:
+    if pr_data.mergeable is False:
+        # mergeable can also be null, in which case the warning would be a false positive.
         print(
             'WARNING!! PR #{} can not currently be merged. You will need to '
             'resolve the conflicts manually before finalizing the release.'.format(pr_data.number)
         )
-    return pr_data.mergeable
+
+    return pr_data.mergeable is True
 
 
 def create_release_draft(repository, version, pr_data, files):
@@ -158,24 +166,6 @@ def distclean():
 
     for folder in dirs:
         shutil.rmtree(folder, ignore_errors=True)
-
-
-def pypi_upload(args):
-    print('Uploading to PyPi')
-    try:
-        twine_upload([
-            'dist/docker_compose-{}*.whl'.format(args.release),
-            'dist/docker-compose-{}*.tar.gz'.format(args.release)
-        ])
-    except HTTPError as e:
-        if e.response.status_code == 400 and 'File already exists' in e.message:
-            if not args.finalize_resume:
-                raise ScriptError(
-                    'Package already uploaded on PyPi.'
-                )
-            print('Skipping PyPi upload - package already uploaded')
-        else:
-            raise ScriptError('Unexpected HTTP error uploading package to PyPi: {}'.format(e))
 
 
 def resume(args):
@@ -266,6 +256,7 @@ def start(args):
 def finalize(args):
     distclean()
     try:
+        check_pypirc()
         repository = Repository(REPO_ROOT, args.repo)
         img_manager = ImageManager(args.release)
         pr_data = repository.find_release_pr(args.release)
@@ -273,7 +264,7 @@ def finalize(args):
             raise ScriptError('No PR found for {}'.format(args.release))
         if not check_pr_mergeable(pr_data):
             raise ScriptError('Can not finalize release with an unmergeable PR')
-        if not img_manager.check_images(args.release):
+        if not img_manager.check_images():
             raise ScriptError('Missing release image')
         br_name = branch_name(args.release)
         if not repository.branch_exists(br_name):
@@ -284,10 +275,8 @@ def finalize(args):
 
         repository.checkout_branch(br_name)
 
-        pypandoc.convert_file(
-            os.path.join(REPO_ROOT, 'README.md'), 'rst', outputfile=os.path.join(REPO_ROOT, 'README.rst')
-        )
-        run_setup(os.path.join(REPO_ROOT, 'setup.py'), script_args=['sdist', 'bdist_wheel'])
+        os.system('python {setup_script} sdist bdist_wheel'.format(
+            setup_script=os.path.join(REPO_ROOT, 'setup.py')))
 
         merge_status = pr_data.merge()
         if not merge_status.merged and not args.finalize_resume:

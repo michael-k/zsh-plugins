@@ -1,6 +1,169 @@
 Change log
 ==========
 
+1.24.0 (2019-03-22)
+-------------------
+
+### Features
+
+- Added support for connecting to the Docker Engine using the `ssh` protocol.
+
+- Added a `--all` flag to `docker-compose ps` to include stopped one-off containers
+  in the command's output.
+
+- Add bash completion for `ps --all|-a`
+
+- Support for credential_spec
+
+- Add `--parallel` to `docker build`'s options in `bash` and `zsh` completion
+
+### Bugfixes
+
+- Fixed a bug where some valid credential helpers weren't properly handled by Compose
+  when attempting to pull images from private registries.
+
+- Fixed an issue where the output of `docker-compose start` before containers were created
+  was misleading
+
+- To match the Docker CLI behavior and to avoid confusing issues, Compose will no longer
+  accept whitespace in variable names sourced from environment files.
+
+- Compose will now report a configuration error if a service attempts to declare
+  duplicate mount points in the volumes section.
+
+- Fixed an issue with the containerized version of Compose that prevented users from
+  writing to stdin during interactive sessions started by `run` or `exec`.
+
+- One-off containers started by `run` no longer adopt the restart policy of the service,
+  and are instead set to never restart.
+
+- Fixed an issue that caused some container events to not appear in the output of
+  the `docker-compose events` command.
+
+- Missing images will no longer stop the execution of `docker-compose down` commands
+  (a warning will be displayed instead).
+
+- Force `virtualenv` version for macOS CI
+
+- Fix merging of compose files when network has `None` config
+
+- Fix `CTRL+C` issues by enabling `bootloader_ignore_signals` in `pyinstaller`
+
+- Bump `docker-py` version to `3.7.2` to fix SSH and proxy config issues
+
+- Fix release script and some typos on release documentation
+
+1.23.2 (2018-11-28)
+-------------------
+
+### Bugfixes
+
+- Reverted a 1.23.0 change that appended random strings to container names
+  created by `docker-compose up`, causing addressability issues.
+  Note: Containers created by `docker-compose run` will continue to use
+  randomly generated names to avoid collisions during parallel runs.
+
+- Fixed an issue where some `dockerfile` paths would fail unexpectedly when
+  attempting to build on Windows.
+
+- Fixed a bug where build context URLs would fail to build on Windows.
+
+- Fixed a bug that caused `run` and `exec` commands to fail for some otherwise
+  accepted values of the `--host` parameter.
+
+- Fixed an issue where overrides for the `storage_opt` and `isolation` keys in
+  service definitions weren't properly applied.
+
+- Fixed a bug where some invalid Compose files would raise an uncaught
+  exception during validation.
+
+1.23.1 (2018-11-01)
+-------------------
+
+### Bugfixes
+
+- Fixed a bug where working with containers created with a previous (< 1.23.0)
+  version of Compose would cause unexpected crashes
+
+- Fixed an issue where the behavior of the `--project-directory` flag would
+  vary depending on which subcommand was being used.
+
+1.23.0 (2018-10-30)
+-------------------
+
+### Important note
+
+The default naming scheme for containers created by Compose in this version
+has changed from `<project>_<service>_<index>` to
+`<project>_<service>_<index>_<slug>`, where `<slug>` is a randomly-generated
+hexadecimal string. Please make sure to update scripts relying on the old
+naming scheme accordingly before upgrading.
+
+### Features
+
+- Logs for containers restarting after a crash will now appear in the output
+  of the `up` and `logs` commands.
+
+- Added `--hash` option to the `docker-compose config` command, allowing users
+  to print a hash string for each service's configuration to facilitate rolling
+  updates.
+
+- Added `--parallel` flag to the `docker-compose build` command, allowing
+  Compose to build up to 5 images simultaneously.
+
+- Output for the `pull` command now reports status / progress even when pulling
+  multiple images in parallel.
+
+- For images with multiple names, Compose will now attempt to match the one
+  present in the service configuration in the output of the `images` command.
+
+### Bugfixes
+
+- Parallel `run` commands for the same service will no longer fail due to name
+  collisions.
+
+- Fixed an issue where paths longer than 260 characters on Windows clients would
+  cause `docker-compose build` to fail.
+
+- Fixed a bug where attempting to mount `/var/run/docker.sock` with
+  Docker Desktop for Windows would result in failure.
+
+- The `--project-directory` option is now used by Compose to determine where to
+  look for the `.env` file.
+
+- `docker-compose build` no longer fails when attempting to pull an image with
+  credentials provided by the gcloud credential helper.
+
+- Fixed the `--exit-code-from` option in `docker-compose up` to always report
+  the actual exit code even when the watched container isn't the cause of the
+  exit.
+
+- Fixed an issue that would prevent recreating a service in some cases where
+  a volume would be mapped to the same mountpoint as a volume declared inside
+  the image's Dockerfile.
+
+- Fixed a bug that caused hash configuration with multiple networks to be
+  inconsistent, causing some services to be unnecessarily restarted.
+
+- Fixed a bug that would cause failures with variable substitution for services
+  with a name containing one or more dot characters
+
+- Fixed a pipe handling issue when using the containerized version of Compose.
+
+- Fixed a bug causing `external: false` entries in the Compose file to be
+  printed as `external: true` in the output of `docker-compose config`
+
+- Fixed a bug where issuing a `docker-compose pull` command on services
+  without a defined image key would cause Compose to crash
+
+- Volumes and binds are now mounted in the order they're declared in the
+  service definition
+
+### Miscellaneous
+
+- The `zsh` completion script has been updated with new options, and no
+  longer suggests container names where service names are expected.
+
 1.22.0 (2018-07-17)
 -------------------
 
@@ -60,7 +223,7 @@ Change log
 
 ### Bugfixes
 
-- Fixed a bug where the ip_range attirbute in IPAM configs was prevented
+- Fixed a bug where the ip_range attribute in IPAM configs was prevented
   from passing validation
 
 1.21.1 (2018-04-27)
@@ -285,7 +448,7 @@ Change log
   preventing Compose from recovering volume data from previous containers for
   anonymous volumes
 
-- Added limit for number of simulatenous parallel operations, which should
+- Added limit for number of simultaneous parallel operations, which should
   prevent accidental resource exhaustion of the server. Default is 64 and
   can be configured using the `COMPOSE_PARALLEL_LIMIT` environment variable
 
@@ -583,7 +746,7 @@ Change log
 ### Bugfixes
 
 - Volumes specified through the `--volume` flag of `docker-compose run` now
-  complement volumes declared in the service's defintion instead of replacing
+  complement volumes declared in the service's definition instead of replacing
   them
 
 - Fixed a bug where using multiple Compose files would unset the scale value

@@ -3,10 +3,10 @@ from __future__ import unicode_literals
 
 import codecs
 import hashlib
-import json
 import json.decoder
 import logging
 import ntpath
+import random
 
 import six
 from docker.errors import DockerException
@@ -150,4 +150,38 @@ def unquote_path(s):
         return s
     if s[0] == '"' and s[-1] == '"':
         return s[1:-1]
+    return s
+
+
+def generate_random_id():
+    while True:
+        val = hex(random.getrandbits(32 * 8))[2:-1]
+        try:
+            int(truncate_id(val))
+            continue
+        except ValueError:
+            return val
+
+
+def truncate_id(value):
+    if ':' in value:
+        value = value[value.index(':') + 1:]
+    if len(value) > 12:
+        return value[:12]
+    return value
+
+
+def unique_everseen(iterable, key=lambda x: x):
+    "List unique elements, preserving order. Remember all elements ever seen."
+    seen = set()
+    for element in iterable:
+        unique_key = key(element)
+        if unique_key not in seen:
+            seen.add(unique_key)
+            yield element
+
+
+def truncate_string(s, max_chars=35):
+    if len(s) > max_chars:
+        return s[:max_chars - 2] + '...'
     return s

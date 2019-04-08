@@ -7,9 +7,12 @@ import six
 from docker.errors import ImageNotFound
 
 from .const import LABEL_CONTAINER_NUMBER
+from .const import LABEL_ONE_OFF
 from .const import LABEL_PROJECT
 from .const import LABEL_SERVICE
+from .const import LABEL_SLUG
 from .const import LABEL_VERSION
+from .utils import truncate_id
 from .version import ComposeVersion
 
 
@@ -80,17 +83,35 @@ class Container(object):
     @property
     def name_without_project(self):
         if self.name.startswith('{0}_{1}'.format(self.project, self.service)):
-            return '{0}_{1}'.format(self.service, self.number)
+            return '{0}_{1}'.format(self.service, self.number if self.number is not None else self.slug)
         else:
             return self.name
 
     @property
     def number(self):
+        if self.one_off:
+            # One-off containers are no longer assigned numbers and use slugs instead.
+            return None
+
         number = self.labels.get(LABEL_CONTAINER_NUMBER)
         if not number:
             raise ValueError("Container {0} does not have a {1} label".format(
                 self.short_id, LABEL_CONTAINER_NUMBER))
         return int(number)
+
+    @property
+    def slug(self):
+        if not self.full_slug:
+            return None
+        return truncate_id(self.full_slug)
+
+    @property
+    def full_slug(self):
+        return self.labels.get(LABEL_SLUG)
+
+    @property
+    def one_off(self):
+        return self.labels.get(LABEL_ONE_OFF) == 'True'
 
     @property
     def ports(self):

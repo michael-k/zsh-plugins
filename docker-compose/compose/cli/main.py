@@ -206,8 +206,8 @@ class TopLevelCommand(object):
                                   name specified in the client certificate
       --project-directory PATH    Specify an alternate working directory
                                   (default: the path of the Compose file)
-      --compatibility             If set, Compose will attempt to convert deploy
-                                  keys in v3 files to their non-Swarm equivalent
+      --compatibility             If set, Compose will attempt to convert keys
+                                  in v3 files to their non-Swarm equivalent
 
     Commands:
       build              Build or rebuild services
@@ -238,10 +238,13 @@ class TopLevelCommand(object):
       version            Show the Docker-Compose version information
     """
 
-    def __init__(self, project, project_dir='.', options=None):
+    def __init__(self, project, options=None):
         self.project = project
-        self.project_dir = '.'
         self.toplevel_options = options or {}
+
+    @property
+    def project_dir(self):
+        return self.toplevel_options.get('--project-directory') or '.'
 
     def build(self, options):
         """
@@ -260,6 +263,7 @@ class TopLevelCommand(object):
             --pull                  Always attempt to pull a newer version of the image.
             -m, --memory MEM        Sets memory limit for the build container.
             --build-arg key=val     Set build-time variables for services.
+            --parallel              Build images in parallel.
         """
         service_names = options['SERVICE']
         build_args = options.get('--build-arg', None)
@@ -280,6 +284,7 @@ class TopLevelCommand(object):
             memory=options.get('--memory'),
             build_args=build_args,
             gzip=options.get('--compress', False),
+            parallel_build=options.get('--parallel', False),
         )
 
     def bundle(self, options):
@@ -301,7 +306,7 @@ class TopLevelCommand(object):
             -o, --output PATH          Path to write the bundle file to.
                                        Defaults to "<project name>.dab".
         """
-        compose_config = get_config_from_options(self.project_dir, self.toplevel_options)
+        compose_config = get_config_from_options('.', self.toplevel_options)
 
         output = options["--output"]
         if not output:
@@ -326,10 +331,12 @@ class TopLevelCommand(object):
                                      anything.
             --services               Print the service names, one per line.
             --volumes                Print the volume names, one per line.
-
+            --hash="*"               Print the service config hash, one per line.
+                                     Set "service1,service2" for a list of specified services
+                                     or use the wildcard symbol to display all services
         """
 
-        compose_config = get_config_from_options(self.project_dir, self.toplevel_options)
+        compose_config = get_config_from_options('.', self.toplevel_options)
         image_digests = None
 
         if options['--resolve-image-digests']:
@@ -346,6 +353,15 @@ class TopLevelCommand(object):
 
         if options['--volumes']:
             print('\n'.join(volume for volume in compose_config.volumes))
+            return
+
+        if options['--hash'] is not None:
+            h = options['--hash']
+            self.project = project_from_options('.', self.toplevel_options)
+            services = [svc for svc in options['--hash'].split(',')] if h != '*' else None
+            with errors.handle_connection_errors(self.project.client):
+                for service in self.project.get_services(services):
+                    print('{} {}'.format(service.name, service.config_hash))
             return
 
         print(serialize_config(compose_config, image_digests))
@@ -552,31 +568,43 @@ class TopLevelCommand(object):
         if options['--quiet']:
             for image in set(c.image for c in containers):
                 print(image.split(':')[1])
-        else:
-            headers = [
-                'Container',
-                'Repository',
-                'Tag',
-                'Image Id',
-                'Size'
-            ]
-            rows = []
-            for container in containers:
-                image_config = container.image_config
-                repo_tags = (
-                    image_config['RepoTags'][0].rsplit(':', 1) if image_config['RepoTags']
-                    else ('<none>', '<none>')
-                )
-                image_id = image_config['Id'].split(':')[1][:12]
-                size = human_readable_file_size(image_config['Size'])
-                rows.append([
-                    container.name,
-                    repo_tags[0],
-                    repo_tags[1],
-                    image_id,
-                    size
-                ])
-            print(Formatter().table(headers, rows))
+            return
+
+        def add_default_tag(img_name):
+            if ':' not in img_name.split('/')[-1]:
+                return '{}:latest'.format(img_name)
+            return img_name
+
+        headers = [
+            'Container',
+            'Repository',
+            'Tag',
+            'Image Id',
+            'Size'
+        ]
+        rows = []
+        for container in containers:
+            image_config = container.image_config
+            service = self.project.get_service(container.service)
+            index = 0
+            img_name = add_default_tag(service.image_name)
+            if img_name in image_config['RepoTags']:
+                index = image_config['RepoTags'].index(img_name)
+            repo_tags = (
+                image_config['RepoTags'][index].rsplit(':', 1) if image_config['RepoTags']
+                else ('<none>', '<none>')
+            )
+
+            image_id = image_config['Id'].split(':')[1][:12]
+            size = human_readable_file_size(image_config['Size'])
+            rows.append([
+                container.name,
+                repo_tags[0],
+                repo_tags[1],
+                image_id,
+                size
+            ])
+        print(Formatter().table(headers, rows))
 
     def kill(self, options):
         """
@@ -666,6 +694,7 @@ class TopLevelCommand(object):
             -q, --quiet          Only display IDs
             --services           Display services
             --filter KEY=VAL     Filter services by a property
+            -a, --all            Show all stopped containers (including those created by the run command)
         """
         if options['--quiet'] and options['--services']:
             raise UserError('--quiet and --services cannot be combined')
@@ -678,10 +707,14 @@ class TopLevelCommand(object):
             print('\n'.join(service.name for service in services))
             return
 
-        containers = sorted(
-            self.project.containers(service_names=options['SERVICE'], stopped=True) +
-            self.project.containers(service_names=options['SERVICE'], one_off=OneOffFilter.only),
-            key=attrgetter('name'))
+        if options['--all']:
+            containers = sorted(self.project.containers(service_names=options['SERVICE'],
+                                                        one_off=OneOffFilter.include, stopped=True))
+        else:
+            containers = sorted(
+                self.project.containers(service_names=options['SERVICE'], stopped=True) +
+                self.project.containers(service_names=options['SERVICE'], one_off=OneOffFilter.only),
+                key=attrgetter('name'))
 
         if options['--quiet']:
             for container in containers:
@@ -839,7 +872,7 @@ class TopLevelCommand(object):
         else:
             command = service.options.get('command')
 
-        container_options = build_container_options(options, detach, command)
+        container_options = build_one_off_container_options(options, detach, command)
         run_one_off_container(
             container_options, self.project, service, options,
             self.toplevel_options, self.project_dir
@@ -1085,12 +1118,15 @@ class TopLevelCommand(object):
                 )
 
                 self.project.stop(service_names=service_names, timeout=timeout)
+                if exit_value_from:
+                    exit_code = compute_service_exit_code(exit_value_from, attached_containers)
+
                 sys.exit(exit_code)
 
     @classmethod
     def version(cls, options):
         """
-        Show version informations
+        Show version information
 
         Usage: version [--short]
 
@@ -1103,33 +1139,33 @@ class TopLevelCommand(object):
             print(get_version_info('full'))
 
 
+def compute_service_exit_code(exit_value_from, attached_containers):
+    candidates = list(filter(
+        lambda c: c.service == exit_value_from,
+        attached_containers))
+    if not candidates:
+        log.error(
+            'No containers matching the spec "{0}" '
+            'were run.'.format(exit_value_from)
+        )
+        return 2
+    if len(candidates) > 1:
+        exit_values = filter(
+            lambda e: e != 0,
+            [c.inspect()['State']['ExitCode'] for c in candidates]
+        )
+
+        return exit_values[0]
+    return candidates[0].inspect()['State']['ExitCode']
+
+
 def compute_exit_code(exit_value_from, attached_containers, cascade_starter, all_containers):
     exit_code = 0
-    if exit_value_from:
-        candidates = list(filter(
-            lambda c: c.service == exit_value_from,
-            attached_containers))
-        if not candidates:
-            log.error(
-                'No containers matching the spec "{0}" '
-                'were run.'.format(exit_value_from)
-            )
-            exit_code = 2
-        elif len(candidates) > 1:
-            exit_values = filter(
-                lambda e: e != 0,
-                [c.inspect()['State']['ExitCode'] for c in candidates]
-            )
-
-            exit_code = exit_values[0]
-        else:
-            exit_code = candidates[0].inspect()['State']['ExitCode']
-    else:
-        for e in all_containers:
-            if (not e.is_running and cascade_starter == e.name):
-                if not e.exit_code == 0:
-                    exit_code = e.exit_code
-                    break
+    for e in all_containers:
+        if (not e.is_running and cascade_starter == e.name):
+            if not e.exit_code == 0:
+                exit_code = e.exit_code
+                break
 
     return exit_code
 
@@ -1231,7 +1267,7 @@ def build_action_from_opts(options):
     return BuildAction.none
 
 
-def build_container_options(options, detach, command):
+def build_one_off_container_options(options, detach, command):
     container_options = {
         'command': command,
         'tty': not (detach or options['-T'] or not sys.stdin.isatty()),
@@ -1252,8 +1288,8 @@ def build_container_options(options, detach, command):
             [""] if options['--entrypoint'] == '' else options['--entrypoint']
         )
 
-    if options['--rm']:
-        container_options['restart'] = None
+    # Ensure that run command remains one-off (issue #6302)
+    container_options['restart'] = None
 
     if options['--user']:
         container_options['user'] = options.get('--user')
@@ -1421,7 +1457,9 @@ def call_docker(args, dockeropts):
     if verify:
         tls_options.append('--tlsverify')
     if host:
-        tls_options.extend(['--host', host.lstrip('=')])
+        tls_options.extend(
+            ['--host', re.sub(r'^https?://', 'tcp://', host.lstrip('='))]
+        )
 
     args = [executable_path] + tls_options + args
     log.debug(" ".join(map(pipes.quote, args)))

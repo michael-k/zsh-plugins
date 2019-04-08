@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 from operator import itemgetter
+from random import shuffle
 
 import py
 import pytest
@@ -42,7 +43,7 @@ from tests import unittest
 DEFAULT_VERSION = V2_0
 
 
-def make_service_dict(name, service_dict, working_dir, filename=None):
+def make_service_dict(name, service_dict, working_dir='.', filename=None):
     """Test helper function to construct a ServiceExtendsResolver
     """
     resolver = config.ServiceExtendsResolver(
@@ -612,6 +613,19 @@ class ConfigTest(unittest.TestCase):
             excinfo.exconly()
         )
 
+    def test_config_integer_service_property_raise_validation_error(self):
+        with pytest.raises(ConfigurationError) as excinfo:
+            config.load(
+                build_config_details({
+                    'version': '2.1',
+                    'services': {'foobar': {'image': 'busybox', 1234: 'hah'}}
+                }, 'working_dir', 'filename.yml')
+            )
+
+        assert (
+            "Unsupported config option for services.foobar: '1234'" in excinfo.exconly()
+        )
+
     def test_config_invalid_service_name_raise_validation_error(self):
         with pytest.raises(ConfigurationError) as excinfo:
             config.load(
@@ -1071,8 +1085,43 @@ class ConfigTest(unittest.TestCase):
         details = config.ConfigDetails('.', [base_file, override_file])
         web_service = config.load(details).services[0]
         assert web_service['networks'] == {
-            'foobar': {'aliases': ['foo', 'bar']},
-            'baz': None
+            'foobar': {'aliases': ['bar', 'foo']},
+            'baz': {}
+        }
+
+    def test_load_with_multiple_files_mismatched_networks_format_inverse_order(self):
+        base_file = config.ConfigFile(
+            'override.yaml',
+            {
+                'version': '2',
+                'services': {
+                    'web': {
+                        'networks': ['baz']
+                    }
+                }
+            }
+        )
+        override_file = config.ConfigFile(
+            'base.yaml',
+            {
+                'version': '2',
+                'services': {
+                    'web': {
+                        'image': 'example/web',
+                        'networks': {
+                            'foobar': {'aliases': ['foo', 'bar']}
+                        }
+                    }
+                },
+                'networks': {'foobar': {}, 'baz': {}}
+            }
+        )
+
+        details = config.ConfigDetails('.', [base_file, override_file])
+        web_service = config.load(details).services[0]
+        assert web_service['networks'] == {
+            'foobar': {'aliases': ['bar', 'foo']},
+            'baz': {}
         }
 
     def test_load_with_multiple_files_v2(self):
@@ -1291,7 +1340,7 @@ class ConfigTest(unittest.TestCase):
         assert tmpfs_mount.target == '/tmpfs'
         assert not tmpfs_mount.is_named_volume
 
-        assert host_mount.source == os.path.normpath('/abc')
+        assert host_mount.source == '/abc'
         assert host_mount.target == '/xyz'
         assert not host_mount.is_named_volume
 
@@ -1321,6 +1370,32 @@ class ConfigTest(unittest.TestCase):
         assert mount.target == '/web'
         assert mount.type == 'bind'
         assert mount.source == expected_source
+
+    def test_load_bind_mount_relative_path_with_tilde(self):
+        base_file = config.ConfigFile(
+            'base.yaml', {
+                'version': '3.4',
+                'services': {
+                    'web': {
+                        'image': 'busybox:latest',
+                        'volumes': [
+                            {'type': 'bind', 'source': '~/web', 'target': '/web'},
+                        ],
+                    },
+                },
+            },
+        )
+
+        details = config.ConfigDetails('.', [base_file])
+        config_data = config.load(details)
+        mount = config_data.services[0].get('volumes')[0]
+        assert mount.target == '/web'
+        assert mount.type == 'bind'
+        assert (
+            not mount.source.startswith('~') and mount.source.endswith(
+                '{}web'.format(os.path.sep)
+            )
+        )
 
     def test_config_invalid_ipam_config(self):
         with pytest.raises(ConfigurationError) as excinfo:
@@ -2643,6 +2718,45 @@ class ConfigTest(unittest.TestCase):
             ['c 7:128 rwm', 'x 3:244 rw', 'f 0:128 n']
         )
 
+    def test_merge_isolation(self):
+        base = {
+            'image': 'bar',
+            'isolation': 'default',
+        }
+
+        override = {
+            'isolation': 'hyperv',
+        }
+
+        actual = config.merge_service_dicts(base, override, V2_3)
+        assert actual == {
+            'image': 'bar',
+            'isolation': 'hyperv',
+        }
+
+    def test_merge_storage_opt(self):
+        base = {
+            'image': 'bar',
+            'storage_opt': {
+                'size': '1G',
+                'readonly': 'false',
+            }
+        }
+
+        override = {
+            'storage_opt': {
+                'size': '2G',
+                'encryption': 'aes',
+            }
+        }
+
+        actual = config.merge_service_dicts(base, override, V2_3)
+        assert actual['storage_opt'] == {
+            'size': '2G',
+            'readonly': 'false',
+            'encryption': 'aes',
+        }
+
     def test_external_volume_config(self):
         config_details = build_config_details({
             'version': '2',
@@ -2991,6 +3105,41 @@ class ConfigTest(unittest.TestCase):
             }
         )
         config.load(config_details)
+
+    def test_config_duplicate_mount_points(self):
+        config1 = build_config_details(
+            {
+                'version': '3.5',
+                'services': {
+                    'web': {
+                        'image': 'busybox',
+                        'volumes': ['/tmp/foo:/tmp/foo', '/tmp/foo:/tmp/foo:rw']
+                    }
+                }
+            }
+        )
+
+        config2 = build_config_details(
+            {
+                'version': '3.5',
+                'services': {
+                    'web': {
+                        'image': 'busybox',
+                        'volumes': ['/x:/y', '/z:/y']
+                    }
+                }
+            }
+        )
+
+        with self.assertRaises(ConfigurationError) as e:
+            config.load(config1)
+        self.assertEquals(str(e.exception), 'Duplicate mount points: [%s]' % (
+            ', '.join(['/tmp/foo:/tmp/foo:rw']*2)))
+
+        with self.assertRaises(ConfigurationError) as e:
+            config.load(config2)
+        self.assertEquals(str(e.exception), 'Duplicate mount points: [%s]' % (
+            ', '.join(['/x:/y:rw', '/z:/y:rw'])))
 
 
 class NetworkModeTest(unittest.TestCase):
@@ -3444,6 +3593,9 @@ class InterpolationTest(unittest.TestCase):
                             'reservations': {'memory': '100M'},
                         },
                     },
+                    'credential_spec': {
+                        'file': 'spec.json'
+                    },
                 },
             },
         })
@@ -3461,7 +3613,8 @@ class InterpolationTest(unittest.TestCase):
             'mem_limit': '300M',
             'mem_reservation': '100M',
             'cpus': 0.7,
-            'name': 'foo'
+            'name': 'foo',
+            'security_opt': ['credentialspec=file://spec.json'],
         }
 
     @mock.patch.dict(os.environ)
@@ -3535,6 +3688,13 @@ class VolumeConfigTest(unittest.TestCase):
             )
         ).services[0]
         assert d['volumes'] == [VolumeSpec.parse('/host/path:/container/path')]
+
+    @pytest.mark.skipif(IS_WINDOWS_PLATFORM, reason='posix paths')
+    def test_volumes_order_is_preserved(self):
+        volumes = ['/{0}:/{0}'.format(i) for i in range(0, 6)]
+        shuffle(volumes)
+        cfg = make_service_dict('foo', {'build': '.', 'volumes': volumes})
+        assert cfg['volumes'] == volumes
 
     @pytest.mark.skipif(IS_WINDOWS_PLATFORM, reason='posix paths')
     @mock.patch.dict(os.environ)
@@ -3757,8 +3917,95 @@ class MergePortsTest(unittest.TestCase, MergeListsTest):
 
 class MergeNetworksTest(unittest.TestCase, MergeListsTest):
     config_name = 'networks'
-    base_config = ['frontend', 'backend']
-    override_config = ['monitoring']
+    base_config = {'default': {'aliases': ['foo.bar', 'foo.baz']}}
+    override_config = {'default': {'ipv4_address': '123.234.123.234'}}
+
+    def test_no_network_overrides(self):
+        service_dict = config.merge_service_dicts(
+            {self.config_name: self.base_config},
+            {self.config_name: self.override_config},
+            DEFAULT_VERSION)
+        assert service_dict[self.config_name] == {
+            'default': {
+                'aliases': ['foo.bar', 'foo.baz'],
+                'ipv4_address': '123.234.123.234'
+            }
+        }
+
+    def test_network_has_none_value(self):
+        service_dict = config.merge_service_dicts(
+            {self.config_name: {
+                'default': None
+            }},
+            {self.config_name: {
+                'default': {
+                    'aliases': []
+                }
+            }},
+            DEFAULT_VERSION)
+
+        assert service_dict[self.config_name] == {
+            'default': {
+                'aliases': []
+            }
+        }
+
+    def test_all_properties(self):
+        service_dict = config.merge_service_dicts(
+            {self.config_name: {
+                'default': {
+                    'aliases': ['foo.bar', 'foo.baz'],
+                    'link_local_ips': ['192.168.1.10', '192.168.1.11'],
+                    'ipv4_address': '111.111.111.111',
+                    'ipv6_address': 'FE80:CD00:0000:0CDE:1257:0000:211E:729C-first'
+                }
+            }},
+            {self.config_name: {
+                'default': {
+                    'aliases': ['foo.baz', 'foo.baz2'],
+                    'link_local_ips': ['192.168.1.11', '192.168.1.12'],
+                    'ipv4_address': '123.234.123.234',
+                    'ipv6_address': 'FE80:CD00:0000:0CDE:1257:0000:211E:729C-second'
+                }
+            }},
+            DEFAULT_VERSION)
+
+        assert service_dict[self.config_name] == {
+            'default': {
+                'aliases': ['foo.bar', 'foo.baz', 'foo.baz2'],
+                'link_local_ips': ['192.168.1.10', '192.168.1.11', '192.168.1.12'],
+                'ipv4_address': '123.234.123.234',
+                'ipv6_address': 'FE80:CD00:0000:0CDE:1257:0000:211E:729C-second'
+            }
+        }
+
+    def test_no_network_name_overrides(self):
+        service_dict = config.merge_service_dicts(
+            {
+                self.config_name: {
+                    'default': {
+                        'aliases': ['foo.bar', 'foo.baz'],
+                        'ipv4_address': '123.234.123.234'
+                    }
+                }
+            },
+            {
+                self.config_name: {
+                    'another_network': {
+                        'ipv4_address': '123.234.123.234'
+                    }
+                }
+            },
+            DEFAULT_VERSION)
+        assert service_dict[self.config_name] == {
+            'default': {
+                'aliases': ['foo.bar', 'foo.baz'],
+                'ipv4_address': '123.234.123.234'
+            },
+            'another_network': {
+                'ipv4_address': '123.234.123.234'
+            }
+        }
 
 
 class MergeStringsOrListsTest(unittest.TestCase):
@@ -5096,3 +5343,19 @@ class SerializeTest(unittest.TestCase):
         serialized_config = yaml.load(serialize_config(config_dict))
         serialized_service = serialized_config['services']['web']
         assert serialized_service['command'] == 'echo 十六夜　咲夜'
+
+    def test_serialize_external_false(self):
+        cfg = {
+            'version': '3.4',
+            'volumes': {
+                'test': {
+                    'name': 'test-false',
+                    'external': False
+                }
+            }
+        }
+
+        config_dict = config.load(build_config_details(cfg))
+        serialized_config = yaml.load(serialize_config(config_dict))
+        serialized_volume = serialized_config['volumes']['test']
+        assert serialized_volume['external'] is False

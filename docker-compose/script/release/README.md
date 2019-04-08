@@ -9,8 +9,7 @@ The following things are required to bring a release to a successful conclusion
 
 ### Local Docker engine (Linux Containers)
 
-The release script runs inside a container and builds images that will be part
-of the release.
+The release script builds images that will be part of the release.
 
 ### Docker Hub account
 
@@ -19,6 +18,10 @@ following repositories:
 
 - docker/compose
 - docker/compose-tests
+
+### Python
+
+The release script is written in Python and requires Python 3.3 at minimum.
 
 ### A Github account and Github API token
 
@@ -37,7 +40,7 @@ This API token should be exposed to the release script through the
 ### A Bintray account and Bintray API key
 
 Your Bintray account will need to be an admin member of the
-[docker-compose organization](https://github.com/settings/tokens).
+[docker-compose organization](https://bintray.com/docker-compose).
 Additionally, you should generate a personal API key. To do so, click your
 username in the top-right hand corner and select "Edit profile" ; on the new
 page, select "API key" in the left-side menu.
@@ -52,6 +55,18 @@ Said account needs to be a member of the maintainers group for the
 
 Moreover, the `~/.pypirc` file should exist on your host and contain the
 relevant pypi credentials.
+
+The following is a sample `.pypirc` provided as a guideline:
+
+```
+[distutils]
+index-servers =
+    pypi
+
+[pypi]
+username = user
+password = pass
+```
 
 ## Start a feature release
 
@@ -114,7 +129,7 @@ assets public), proceed to the "Finalize a release" section of this guide.
 Once you're ready to make your release public, you may execute the following
 command from the root of the Compose repository:
 ```
-./script/release/release.sh -b <BINTRAY_USERNAME> finalize RELEAE_VERSION
+./script/release/release.sh -b <BINTRAY_USERNAME> finalize RELEASE_VERSION
 ```
 
 Note that this command will create and publish versioned assets to the public.

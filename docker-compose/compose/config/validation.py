@@ -41,15 +41,15 @@ DOCKER_CONFIG_HINTS = {
 }
 
 
-VALID_NAME_CHARS = '[a-zA-Z0-9\._\-]'
+VALID_NAME_CHARS = r'[a-zA-Z0-9\._\-]'
 VALID_EXPOSE_FORMAT = r'^\d+(\-\d+)?(\/[a-zA-Z]+)?$'
 
 VALID_IPV4_SEG = r'(\d{1,2}|1\d{2}|2[0-4]\d|25[0-5])'
-VALID_IPV4_ADDR = "({IPV4_SEG}\.){{3}}{IPV4_SEG}".format(IPV4_SEG=VALID_IPV4_SEG)
-VALID_REGEX_IPV4_CIDR = "^{IPV4_ADDR}/(\d|[1-2]\d|3[0-2])$".format(IPV4_ADDR=VALID_IPV4_ADDR)
+VALID_IPV4_ADDR = r"({IPV4_SEG}\.){{3}}{IPV4_SEG}".format(IPV4_SEG=VALID_IPV4_SEG)
+VALID_REGEX_IPV4_CIDR = r"^{IPV4_ADDR}/(\d|[1-2]\d|3[0-2])$".format(IPV4_ADDR=VALID_IPV4_ADDR)
 
 VALID_IPV6_SEG = r'[0-9a-fA-F]{1,4}'
-VALID_REGEX_IPV6_CIDR = "".join("""
+VALID_REGEX_IPV6_CIDR = "".join(r"""
 ^
 (
     (({IPV6_SEG}:){{7}}{IPV6_SEG})|
@@ -240,6 +240,18 @@ def validate_depends_on(service_config, service_names):
             )
 
 
+def validate_credential_spec(service_config):
+    credential_spec = service_config.config.get('credential_spec')
+    if not credential_spec:
+        return
+
+    if 'registry' not in credential_spec and 'file' not in credential_spec:
+        raise ConfigurationError(
+            "Service '{s.name}' is missing 'credential_spec.file' or "
+            "credential_spec.registry'".format(s=service_config)
+        )
+
+
 def get_unsupported_config_msg(path, error_key):
     msg = "Unsupported config option for {}: '{}'".format(path_string(path), error_key)
     if error_key in DOCKER_CONFIG_HINTS:
@@ -330,7 +342,10 @@ def handle_generic_error(error, path):
 
 
 def parse_key_from_error_msg(error):
-    return error.message.split("'")[1]
+    try:
+        return error.message.split("'")[1]
+    except IndexError:
+        return error.message.split('(')[1].split(' ')[0].strip("'")
 
 
 def path_string(path):

@@ -7,7 +7,6 @@ from .version import ComposeVersion
 
 DEFAULT_TIMEOUT = 10
 HTTP_TIMEOUT = 60
-IMAGE_EVENTS = ['delete', 'import', 'load', 'pull', 'push', 'save', 'tag', 'untag']
 IS_WINDOWS_PLATFORM = (sys.platform == "win32")
 LABEL_CONTAINER_NUMBER = 'com.docker.compose.container-number'
 LABEL_ONE_OFF = 'com.docker.compose.oneoff'
@@ -15,12 +14,14 @@ LABEL_PROJECT = 'com.docker.compose.project'
 LABEL_SERVICE = 'com.docker.compose.service'
 LABEL_NETWORK = 'com.docker.compose.network'
 LABEL_VERSION = 'com.docker.compose.version'
+LABEL_SLUG = 'com.docker.compose.slug'
 LABEL_VOLUME = 'com.docker.compose.volume'
 LABEL_CONFIG_HASH = 'com.docker.compose.config-hash'
 NANOCPUS_SCALE = 1000000000
 PARALLEL_LIMIT = 64
 
 SECRETS_PATH = '/run/secrets'
+WINDOWS_LONGPATH_PREFIX = '\\\\?\\'
 
 COMPOSEFILE_V1 = ComposeVersion('1')
 COMPOSEFILE_V2_0 = ComposeVersion('2.0')

@@ -27,6 +27,7 @@ from . import __version__
 from . import const
 from . import progress_stream
 from .config import DOCKER_CONFIG_KEYS
+from .config import is_url
 from .config import merge_environment
 from .config import merge_labels
 from .config.errors import DependencyError
@@ -40,8 +41,10 @@ from .const import LABEL_CONTAINER_NUMBER
 from .const import LABEL_ONE_OFF
 from .const import LABEL_PROJECT
 from .const import LABEL_SERVICE
+from .const import LABEL_SLUG
 from .const import LABEL_VERSION
 from .const import NANOCPUS_SCALE
+from .const import WINDOWS_LONGPATH_PREFIX
 from .container import Container
 from .errors import HealthCheckFailed
 from .errors import NoHealthCheckConfigured
@@ -49,9 +52,12 @@ from .errors import OperationFailedError
 from .parallel import parallel_execute
 from .progress_stream import stream_output
 from .progress_stream import StreamOutputError
+from .utils import generate_random_id
 from .utils import json_hash
 from .utils import parse_bytes
 from .utils import parse_seconds_float
+from .utils import truncate_id
+from .utils import unique_everseen
 
 
 log = logging.getLogger(__name__)
@@ -80,6 +86,7 @@ HOST_CONFIG_KEYS = [
     'group_add',
     'init',
     'ipc',
+    'isolation',
     'read_only',
     'log_driver',
     'log_opt',
@@ -192,7 +199,9 @@ class Service(object):
     def __repr__(self):
         return '<Service: {}>'.format(self.name)
 
-    def containers(self, stopped=False, one_off=False, filters={}, labels=None):
+    def containers(self, stopped=False, one_off=False, filters=None, labels=None):
+        if filters is None:
+            filters = {}
         filters.update({'label': self.labels(one_off=one_off) + (labels or [])})
 
         result = list(filter(None, [
@@ -219,7 +228,6 @@ class Service(object):
         """Return a :class:`compose.container.Container` for this service. The
         container must be active, and match `number`.
         """
-
         for container in self.containers(labels=['{0}={1}'.format(LABEL_CONTAINER_NUMBER, number)]):
             return container
 
@@ -283,7 +291,7 @@ class Service(object):
                     c for c in stopped_containers if self._containers_have_diverged([c])
                 ]
                 for c in divergent_containers:
-                        c.remove()
+                    c.remove()
 
                 all_containers = list(set(all_containers) - set(divergent_containers))
 
@@ -425,74 +433,78 @@ class Service(object):
 
         return has_diverged
 
-    def _execute_convergence_create(self, scale, detached, start, project_services=None):
-            i = self._next_container_number()
+    def _execute_convergence_create(self, scale, detached, start):
 
-            def create_and_start(service, n):
-                container = service.create_container(number=n, quiet=True)
-                if not detached:
-                    container.attach_log_stream()
-                if start:
-                    self.start_container(container)
-                return container
+        i = self._next_container_number()
 
-            containers, errors = parallel_execute(
-                [ServiceName(self.project, self.name, index) for index in range(i, i + scale)],
-                lambda service_name: create_and_start(self, service_name.number),
-                lambda service_name: self.get_container_name(service_name.service, service_name.number),
-                "Creating"
-            )
-            for error in errors.values():
-                raise OperationFailedError(error)
+        def create_and_start(service, n):
+            container = service.create_container(number=n, quiet=True)
+            if not detached:
+                container.attach_log_stream()
+            if start:
+                self.start_container(container)
+            return container
 
-            return containers
+        containers, errors = parallel_execute(
+            [
+                ServiceName(self.project, self.name, index)
+                for index in range(i, i + scale)
+            ],
+            lambda service_name: create_and_start(self, service_name.number),
+            lambda service_name: self.get_container_name(service_name.service, service_name.number),
+            "Creating"
+        )
+        for error in errors.values():
+            raise OperationFailedError(error)
+
+        return containers
 
     def _execute_convergence_recreate(self, containers, scale, timeout, detached, start,
                                       renew_anonymous_volumes):
-            if scale is not None and len(containers) > scale:
-                self._downscale(containers[scale:], timeout)
-                containers = containers[:scale]
+        if scale is not None and len(containers) > scale:
+            self._downscale(containers[scale:], timeout)
+            containers = containers[:scale]
 
-            def recreate(container):
-                return self.recreate_container(
-                    container, timeout=timeout, attach_logs=not detached,
-                    start_new_container=start, renew_anonymous_volumes=renew_anonymous_volumes
-                )
-            containers, errors = parallel_execute(
-                containers,
-                recreate,
-                lambda c: c.name,
-                "Recreating",
+        def recreate(container):
+            return self.recreate_container(
+                container, timeout=timeout, attach_logs=not detached,
+                start_new_container=start, renew_anonymous_volumes=renew_anonymous_volumes
             )
+        containers, errors = parallel_execute(
+            containers,
+            recreate,
+            lambda c: c.name,
+            "Recreating",
+        )
+        for error in errors.values():
+            raise OperationFailedError(error)
+
+        if scale is not None and len(containers) < scale:
+            containers.extend(self._execute_convergence_create(
+                scale - len(containers), detached, start
+            ))
+        return containers
+
+    def _execute_convergence_start(self, containers, scale, timeout, detached, start):
+        if scale is not None and len(containers) > scale:
+            self._downscale(containers[scale:], timeout)
+            containers = containers[:scale]
+        if start:
+            _, errors = parallel_execute(
+                containers,
+                lambda c: self.start_container_if_stopped(c, attach_logs=not detached, quiet=True),
+                lambda c: c.name,
+                "Starting",
+            )
+
             for error in errors.values():
                 raise OperationFailedError(error)
 
-            if scale is not None and len(containers) < scale:
-                containers.extend(self._execute_convergence_create(
-                    scale - len(containers), detached, start
-                ))
-            return containers
-
-    def _execute_convergence_start(self, containers, scale, timeout, detached, start):
-            if scale is not None and len(containers) > scale:
-                self._downscale(containers[scale:], timeout)
-                containers = containers[:scale]
-            if start:
-                _, errors = parallel_execute(
-                    containers,
-                    lambda c: self.start_container_if_stopped(c, attach_logs=not detached, quiet=True),
-                    lambda c: c.name,
-                    "Starting",
-                )
-
-                for error in errors.values():
-                    raise OperationFailedError(error)
-
-            if scale is not None and len(containers) < scale:
-                containers.extend(self._execute_convergence_create(
-                    scale - len(containers), detached, start
-                ))
-            return containers
+        if scale is not None and len(containers) < scale:
+            containers.extend(self._execute_convergence_create(
+                scale - len(containers), detached, start
+            ))
+        return containers
 
     def _downscale(self, containers, timeout=None):
         def stop_and_remove(container):
@@ -508,8 +520,8 @@ class Service(object):
 
     def execute_convergence_plan(self, plan, timeout=None, detached=False,
                                  start=True, scale_override=None,
-                                 rescale=True, project_services=None,
-                                 reset_container_image=False, renew_anonymous_volumes=False):
+                                 rescale=True, reset_container_image=False,
+                                 renew_anonymous_volumes=False):
         (action, containers) = plan
         scale = scale_override if scale_override is not None else self.scale_num
         containers = sorted(containers, key=attrgetter('number'))
@@ -518,7 +530,7 @@ class Service(object):
 
         if action == 'create':
             return self._execute_convergence_create(
-                scale, detached, start, project_services
+                scale, detached, start
             )
 
         # The create action needs always needs an initial scale, but otherwise,
@@ -568,7 +580,7 @@ class Service(object):
         container.rename_to_tmp_name()
         new_container = self.create_container(
             previous_container=container if not renew_anonymous_volumes else None,
-            number=container.labels.get(LABEL_CONTAINER_NUMBER),
+            number=container.number,
             quiet=True,
         )
         if attach_logs:
@@ -656,9 +668,15 @@ class Service(object):
         return json_hash(self.config_dict())
 
     def config_dict(self):
+        def image_id():
+            try:
+                return self.image()['Id']
+            except NoSuchImageError:
+                return None
+
         return {
             'options': self.options,
-            'image_id': self.image()['Id'],
+            'image_id': image_id(),
             'links': self.get_link_names(),
             'net': self.network_mode.id,
             'networks': self.networks,
@@ -717,19 +735,19 @@ class Service(object):
     def get_volumes_from_names(self):
         return [s.source.name for s in self.volumes_from if isinstance(s.source, Service)]
 
-    # TODO: this would benefit from github.com/docker/docker/pull/14699
-    # to remove the need to inspect every container
     def _next_container_number(self, one_off=False):
+        if one_off:
+            return None
         containers = itertools.chain(
             self._fetch_containers(
                 all=True,
-                filters={'label': self.labels(one_off=one_off)}
+                filters={'label': self.labels(one_off=False)}
             ), self._fetch_containers(
                 all=True,
-                filters={'label': self.labels(one_off=one_off, legacy=True)}
+                filters={'label': self.labels(one_off=False, legacy=True)}
             )
         )
-        numbers = [c.number for c in containers]
+        numbers = [c.number for c in containers if c.number is not None]
         return 1 if not numbers else max(numbers) + 1
 
     def _fetch_containers(self, **fetch_options):
@@ -807,6 +825,7 @@ class Service(object):
             one_off=False,
             previous_container=None):
         add_config_hash = (not one_off and not override_options)
+        slug = generate_random_id() if one_off else None
 
         container_options = dict(
             (k, self.options[k])
@@ -815,7 +834,7 @@ class Service(object):
         container_options.update(override_options)
 
         if not container_options.get('name'):
-            container_options['name'] = self.get_container_name(self.name, number, one_off)
+            container_options['name'] = self.get_container_name(self.name, number, slug)
 
         container_options.setdefault('detach', True)
 
@@ -867,7 +886,9 @@ class Service(object):
             container_options.get('labels', {}),
             self.labels(one_off=one_off),
             number,
-            self.config_hash if add_config_hash else None)
+            self.config_hash if add_config_hash else None,
+            slug
+        )
 
         # Delete options which are only used in HostConfig
         for key in HOST_CONFIG_KEYS:
@@ -924,8 +945,9 @@ class Service(object):
                 override_options['mounts'] = override_options.get('mounts') or []
                 override_options['mounts'].extend([build_mount(v) for v in secret_volumes])
 
-        # Remove possible duplicates (see e.g. https://github.com/docker/compose/issues/5885)
-        override_options['binds'] = list(set(binds))
+        # Remove possible duplicates (see e.g. https://github.com/docker/compose/issues/5885).
+        # unique_everseen preserves order. (see https://github.com/docker/compose/issues/6091).
+        override_options['binds'] = list(unique_everseen(binds))
         return container_options, override_options
 
     def _get_container_host_config(self, override_options, one_off=False):
@@ -1033,12 +1055,7 @@ class Service(object):
         for k, v in self._parse_proxy_config().items():
             build_args.setdefault(k, v)
 
-        # python2 os.stat() doesn't support unicode on some UNIX, so we
-        # encode it to a bytestring to be safe
-        path = build_opts.get('context')
-        if not six.PY3 and not IS_WINDOWS_PLATFORM:
-            path = path.encode('utf8')
-
+        path = rewrite_build_path(build_opts.get('context'))
         if self.platform and version_lt(self.client.api_version, '1.35'):
             raise OperationFailedError(
                 'Impossible to perform platform-targeted builds for API version < 1.35'
@@ -1068,7 +1085,7 @@ class Service(object):
         )
 
         try:
-            all_events = stream_output(build_output, sys.stdout)
+            all_events = list(stream_output(build_output, sys.stdout))
         except StreamOutputError as e:
             raise BuildError(self, six.text_type(e))
 
@@ -1105,12 +1122,12 @@ class Service(object):
     def custom_container_name(self):
         return self.options.get('container_name')
 
-    def get_container_name(self, service_name, number, one_off=False):
-        if self.custom_container_name and not one_off:
+    def get_container_name(self, service_name, number, slug=None):
+        if self.custom_container_name and slug is None:
             return self.custom_container_name
 
         container_name = build_container_name(
-            self.project, service_name, number, one_off,
+            self.project, service_name, number, slug,
         )
         ext_links_origins = [l.split(':')[0] for l in self.options.get('external_links', [])]
         if container_name in ext_links_origins:
@@ -1131,6 +1148,9 @@ class Service(object):
         try:
             self.client.remove_image(self.image_name)
             return True
+        except ImageNotFound:
+            log.warning("Image %s not found.", self.image_name)
+            return False
         except APIError as e:
             log.error("Failed to remove image for service %s: %s", self.name, e)
             return False
@@ -1162,7 +1182,23 @@ class Service(object):
 
         return any(has_host_port(binding) for binding in self.options.get('ports', []))
 
-    def pull(self, ignore_pull_failures=False, silent=False):
+    def _do_pull(self, repo, pull_kwargs, silent, ignore_pull_failures):
+        try:
+            output = self.client.pull(repo, **pull_kwargs)
+            if silent:
+                with open(os.devnull, 'w') as devnull:
+                    for event in stream_output(output, devnull):
+                        yield event
+            else:
+                for event in stream_output(output, sys.stdout):
+                    yield event
+        except (StreamOutputError, NotFound) as e:
+            if not ignore_pull_failures:
+                raise
+            else:
+                log.error(six.text_type(e))
+
+    def pull(self, ignore_pull_failures=False, silent=False, stream=False):
         if 'image' not in self.options:
             return
 
@@ -1179,20 +1215,11 @@ class Service(object):
             raise OperationFailedError(
                 'Impossible to perform platform-targeted pulls for API version < 1.35'
             )
-        try:
-            output = self.client.pull(repo, **kwargs)
-            if silent:
-                with open(os.devnull, 'w') as devnull:
-                    return progress_stream.get_digest_from_pull(
-                        stream_output(output, devnull))
-            else:
-                return progress_stream.get_digest_from_pull(
-                    stream_output(output, sys.stdout))
-        except (StreamOutputError, NotFound) as e:
-            if not ignore_pull_failures:
-                raise
-            else:
-                log.error(six.text_type(e))
+
+        event_stream = self._do_pull(repo, kwargs, silent, ignore_pull_failures)
+        if stream:
+            return event_stream
+        return progress_stream.get_digest_from_pull(event_stream)
 
     def push(self, ignore_push_failures=False):
         if 'image' not in self.options or 'build' not in self.options:
@@ -1360,11 +1387,13 @@ class ServiceNetworkMode(object):
 # Names
 
 
-def build_container_name(project, service, number, one_off=False):
+def build_container_name(project, service, number, slug=None):
     bits = [project.lstrip('-_'), service]
-    if one_off:
-        bits.append('run')
-    return '_'.join(bits + [str(number)])
+    if slug:
+        bits.extend(['run', truncate_id(slug)])
+    else:
+        bits.append(str(number))
+    return '_'.join(bits)
 
 
 # Images
@@ -1407,7 +1436,7 @@ def merge_volume_bindings(volumes, tmpfs, previous_container, mounts):
     """
     affinity = {}
 
-    volume_bindings = dict(
+    volume_bindings = OrderedDict(
         build_volume_binding(volume)
         for volume in volumes
         if volume.external
@@ -1465,6 +1494,11 @@ def get_container_data_volumes(container, volumes_option, tmpfs_option, mounts_o
 
         # Volume was previously a host volume, now it's a container volume
         if not mount.get('Name'):
+            continue
+
+        # Volume (probably an image volume) is overridden by a mount in the service's config
+        # and would cause a duplicate mountpoint error
+        if volume.internal in [m.target for m in mounts_option]:
             continue
 
         # Copy existing volume from old container
@@ -1545,10 +1579,13 @@ def build_mount(mount_spec):
 # Labels
 
 
-def build_container_labels(label_options, service_labels, number, config_hash):
+def build_container_labels(label_options, service_labels, number, config_hash, slug):
     labels = dict(label_options or {})
     labels.update(label.split('=', 1) for label in service_labels)
-    labels[LABEL_CONTAINER_NUMBER] = str(number)
+    if number is not None:
+        labels[LABEL_CONTAINER_NUMBER] = str(number)
+    if slug is not None:
+        labels[LABEL_SLUG] = slug
     labels[LABEL_VERSION] = __version__
 
     if config_hash:
@@ -1637,3 +1674,15 @@ def convert_blkio_config(blkio_config):
             arr.append(dict([(k.capitalize(), v) for k, v in item.items()]))
         result[field] = arr
     return result
+
+
+def rewrite_build_path(path):
+    # python2 os.stat() doesn't support unicode on some UNIX, so we
+    # encode it to a bytestring to be safe
+    if not six.PY3 and not IS_WINDOWS_PLATFORM:
+        path = path.encode('utf8')
+
+    if IS_WINDOWS_PLATFORM and not is_url(path) and not path.startswith(WINDOWS_LONGPATH_PREFIX):
+        path = WINDOWS_LONGPATH_PREFIX + os.path.normpath(path)
+
+    return path

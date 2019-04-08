@@ -114,7 +114,7 @@ _docker_compose_build() {
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--build-arg --compress --force-rm --help --memory --no-cache --pull" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--build-arg --compress --force-rm --help --memory --no-cache --pull --parallel" -- "$cur" ) )
 			;;
 		*)
 			__docker_compose_complete_services --filter source=build
@@ -136,7 +136,18 @@ _docker_compose_bundle() {
 
 
 _docker_compose_config() {
-	COMPREPLY=( $( compgen -W "--help --quiet -q --resolve-image-digests --services --volumes" -- "$cur" ) )
+	case "$prev" in
+		--hash)
+			if [[ $cur == \\* ]] ; then
+				COMPREPLY=( '\*' )
+			else
+				COMPREPLY=( $(compgen -W "$(__docker_compose_services) \\\* " -- "$cur") )
+			fi
+			return
+			;;
+	esac
+
+	COMPREPLY=( $( compgen -W "--hash --help --quiet -q --resolve-image-digests --services --volumes" -- "$cur" ) )
 }
 
 
@@ -350,7 +361,7 @@ _docker_compose_ps() {
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--help --quiet -q --services --filter" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--all -a --filter --help --quiet -q --services" -- "$cur" ) )
 			;;
 		*)
 			__docker_compose_complete_services

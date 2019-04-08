@@ -32,11 +32,11 @@ def find_version(*file_paths):
 install_requires = [
     'cached-property >= 1.2.0, < 2',
     'docopt >= 0.6.1, < 0.7',
-    'PyYAML >= 3.10, < 4',
-    'requests >= 2.6.1, != 2.11.0, != 2.12.2, != 2.18.0, < 2.19',
+    'PyYAML >= 3.10, < 4.3',
+    'requests >= 2.6.1, != 2.11.0, != 2.12.2, != 2.18.0, < 2.21',
     'texttable >= 0.9.0, < 0.10',
     'websocket-client >= 0.32.0, < 1.0',
-    'docker >= 3.4.1, < 4.0',
+    'docker[ssh] >= 3.7.0, < 4.0',
     'dockerpty >= 0.4.1, < 0.5',
     'six >= 1.3.0, < 2',
     'jsonschema >= 2.5.1, < 3',
@@ -55,7 +55,7 @@ extras_require = {
     ':python_version < "3.4"': ['enum34 >= 1.0.4, < 2'],
     ':python_version < "3.5"': ['backports.ssl_match_hostname >= 3.5'],
     ':python_version < "3.3"': ['ipaddress >= 1.0.16'],
-    ':sys_platform == "win32"': ['colorama >= 0.3.9, < 0.4'],
+    ':sys_platform == "win32"': ['colorama >= 0.4, < 0.5'],
     'socks': ['PySocks >= 1.5.6, != 1.5.7, < 2'],
 }
 
@@ -77,19 +77,26 @@ setup(
     name='docker-compose',
     version=find_version("compose", "__init__.py"),
     description='Multi-container orchestration for Docker',
+    long_description=read('README.md'),
+    long_description_content_type='text/markdown',
     url='https://www.docker.com/',
+    project_urls={
+        'Documentation': 'https://docs.docker.com/compose/overview',
+        'Changelog': 'https://github.com/docker/compose/blob/release/CHANGELOG.md',
+        'Source': 'https://github.com/docker/compose',
+        'Tracker': 'https://github.com/docker/compose/issues',
+    },
     author='Docker, Inc.',
     license='Apache License 2.0',
     packages=find_packages(exclude=['tests.*', 'tests']),
     include_package_data=True,
-    test_suite='nose.collector',
     install_requires=install_requires,
     extras_require=extras_require,
     tests_require=tests_require,
-    entry_points="""
-    [console_scripts]
-    docker-compose=compose.cli.main:main
-    """,
+    python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*',
+    entry_points={
+        'console_scripts': ['docker-compose=compose.cli.main:main'],
+    },
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
@@ -100,5 +107,6 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
     ],
 )
