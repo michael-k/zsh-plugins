@@ -21,7 +21,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'31019763, "start": 1413653874, "total": 62763875}, '
             b'"progress": "..."}',
         ]
-        events = progress_stream.stream_output(output, StringIO())
+        events = list(progress_stream.stream_output(output, StringIO()))
         assert len(events) == 1
 
     def test_stream_output_div_zero(self):
@@ -30,7 +30,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'0, "start": 1413653874, "total": 0}, '
             b'"progress": "..."}',
         ]
-        events = progress_stream.stream_output(output, StringIO())
+        events = list(progress_stream.stream_output(output, StringIO()))
         assert len(events) == 1
 
     def test_stream_output_null_total(self):
@@ -39,7 +39,7 @@ class ProgressStreamTestCase(unittest.TestCase):
             b'0, "start": 1413653874, "total": null}, '
             b'"progress": "..."}',
         ]
-        events = progress_stream.stream_output(output, StringIO())
+        events = list(progress_stream.stream_output(output, StringIO()))
         assert len(events) == 1
 
     def test_stream_output_progress_event_tty(self):
@@ -52,7 +52,7 @@ class ProgressStreamTestCase(unittest.TestCase):
                 return True
 
         output = TTYStringIO()
-        events = progress_stream.stream_output(events, output)
+        events = list(progress_stream.stream_output(events, output))
         assert len(output.getvalue()) > 0
 
     def test_stream_output_progress_event_no_tty(self):
@@ -61,7 +61,7 @@ class ProgressStreamTestCase(unittest.TestCase):
         ]
         output = StringIO()
 
-        events = progress_stream.stream_output(events, output)
+        events = list(progress_stream.stream_output(events, output))
         assert len(output.getvalue()) == 0
 
     def test_stream_output_no_progress_event_no_tty(self):
@@ -70,7 +70,7 @@ class ProgressStreamTestCase(unittest.TestCase):
         ]
         output = StringIO()
 
-        events = progress_stream.stream_output(events, output)
+        events = list(progress_stream.stream_output(events, output))
         assert len(output.getvalue()) > 0
 
     def test_mismatched_encoding_stream_write(self):
@@ -97,22 +97,24 @@ class ProgressStreamTestCase(unittest.TestCase):
             tf.seek(0)
             assert tf.read() == '???'
 
+    def test_get_digest_from_push(self):
+        digest = "sha256:abcd"
+        events = [
+            {"status": "..."},
+            {"status": "..."},
+            {"progressDetail": {}, "aux": {"Digest": digest}},
+        ]
+        assert progress_stream.get_digest_from_push(events) == digest
 
-def test_get_digest_from_push():
-    digest = "sha256:abcd"
-    events = [
-        {"status": "..."},
-        {"status": "..."},
-        {"progressDetail": {}, "aux": {"Digest": digest}},
-    ]
-    assert progress_stream.get_digest_from_push(events) == digest
+    def test_get_digest_from_pull(self):
+        events = list()
+        assert progress_stream.get_digest_from_pull(events) is None
 
-
-def test_get_digest_from_pull():
-    digest = "sha256:abcd"
-    events = [
-        {"status": "..."},
-        {"status": "..."},
-        {"status": "Digest: %s" % digest},
-    ]
-    assert progress_stream.get_digest_from_pull(events) == digest
+        digest = "sha256:abcd"
+        events = [
+            {"status": "..."},
+            {"status": "..."},
+            {"status": "Digest: %s" % digest},
+            {"status": "..."},
+        ]
+        assert progress_stream.get_digest_from_pull(events) == digest

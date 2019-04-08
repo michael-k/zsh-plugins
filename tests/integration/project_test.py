@@ -90,7 +90,8 @@ class ProjectTest(DockerClientTestCase):
         project.up()
 
         containers = project.containers(['web'])
-        assert [c.name for c in containers] == ['composetest_web_1']
+        assert len(containers) == 1
+        assert containers[0].name.startswith('composetest_web_')
 
     def test_containers_with_extra_service(self):
         web = self.create_service('web')
@@ -103,6 +104,23 @@ class ProjectTest(DockerClientTestCase):
 
         project = Project('composetest', [web, db], self.client)
         assert set(project.containers(stopped=True)) == set([web_1, db_1])
+
+    def test_parallel_pull_with_no_image(self):
+        config_data = build_config(
+            version=V2_3,
+            services=[{
+                'name': 'web',
+                'build': {'context': '.'},
+            }],
+        )
+
+        project = Project.from_config(
+            name='composetest',
+            config_data=config_data,
+            client=self.client
+        )
+
+        project.pull(parallel_pull=True)
 
     def test_volumes_from_service(self):
         project = Project.from_config(
@@ -431,7 +449,7 @@ class ProjectTest(DockerClientTestCase):
         project.up(strategy=ConvergenceStrategy.always)
         assert len(project.containers()) == 2
 
-        db_container = [c for c in project.containers() if 'db' in c.name][0]
+        db_container = [c for c in project.containers() if c.service == 'db'][0]
         assert db_container.id != old_db_id
         assert db_container.get('Volumes./etc') == db_volume_path
 
@@ -451,7 +469,7 @@ class ProjectTest(DockerClientTestCase):
         project.up(strategy=ConvergenceStrategy.always)
         assert len(project.containers()) == 2
 
-        db_container = [c for c in project.containers() if 'db' in c.name][0]
+        db_container = [c for c in project.containers() if c.service == 'db'][0]
         assert db_container.id != old_db_id
         assert db_container.get_mount('/etc')['Source'] == db_volume_path
 
@@ -464,14 +482,14 @@ class ProjectTest(DockerClientTestCase):
 
         project.up(['db'])
         assert len(project.containers()) == 1
-        old_db_id = project.containers()[0].id
         container, = project.containers()
+        old_db_id = container.id
         db_volume_path = container.get_mount('/var/db')['Source']
 
         project.up(strategy=ConvergenceStrategy.never)
         assert len(project.containers()) == 2
 
-        db_container = [c for c in project.containers() if 'db' in c.name][0]
+        db_container = [c for c in project.containers() if c.name == container.name][0]
         assert db_container.id == old_db_id
         assert db_container.get_mount('/var/db')['Source'] == db_volume_path
 
@@ -498,7 +516,7 @@ class ProjectTest(DockerClientTestCase):
         assert len(new_containers) == 2
         assert [c.is_running for c in new_containers] == [True, True]
 
-        db_container = [c for c in new_containers if 'db' in c.name][0]
+        db_container = [c for c in new_containers if c.service == 'db'][0]
         assert db_container.id == old_db_id
         assert db_container.get_mount('/var/db')['Source'] == db_volume_path
 
@@ -1944,7 +1962,7 @@ class ProjectTest(DockerClientTestCase):
 
         containers = project.containers(stopped=True)
         assert len(containers) == 1
-        assert containers[0].name == 'underscoretest_svc1_1'
+        assert containers[0].name.startswith('underscoretest_svc1_')
         assert containers[0].project == '_underscoretest'
 
         full_vol_name = 'underscoretest_foo'
@@ -1965,7 +1983,7 @@ class ProjectTest(DockerClientTestCase):
 
         containers = project2.containers(stopped=True)
         assert len(containers) == 1
-        assert containers[0].name == 'dashtest_svc1_1'
+        assert containers[0].name.startswith('dashtest_svc1_')
         assert containers[0].project == '-dashtest'
 
         full_vol_name = 'dashtest_foo'

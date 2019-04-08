@@ -8,6 +8,7 @@ import os
 import string
 import sys
 from collections import namedtuple
+from operator import attrgetter
 
 import six
 import yaml
@@ -50,6 +51,7 @@ from .validation import match_named_volumes
 from .validation import validate_against_config_schema
 from .validation import validate_config_section
 from .validation import validate_cpu
+from .validation import validate_credential_spec
 from .validation import validate_depends_on
 from .validation import validate_extends_file_path
 from .validation import validate_healthcheck
@@ -91,6 +93,7 @@ DOCKER_CONFIG_KEYS = [
     'healthcheck',
     'image',
     'ipc',
+    'isolation',
     'labels',
     'links',
     'mac_address',
@@ -367,7 +370,6 @@ def check_swarm_only_config(service_dicts, compatibility=False):
             )
     if not compatibility:
         check_swarm_only_key(service_dicts, 'deploy')
-    check_swarm_only_key(service_dicts, 'credential_spec')
     check_swarm_only_key(service_dicts, 'configs')
 
 
@@ -704,6 +706,7 @@ def validate_service(service_config, service_names, config_file):
     validate_depends_on(service_config, service_names)
     validate_links(service_config, service_names)
     validate_healthcheck(service_config)
+    validate_credential_spec(service_config)
 
     if not service_dict.get('image') and has_uppercase(service_name):
         raise ConfigurationError(
@@ -834,6 +837,17 @@ def finalize_service_volumes(service_dict, environment):
                 finalized_volumes.append(MountSpec.parse(v, normalize, win_host))
             else:
                 finalized_volumes.append(VolumeSpec.parse(v, normalize, win_host))
+
+        duplicate_mounts = []
+        mounts = [v.as_volume_spec() if isinstance(v, MountSpec) else v for v in finalized_volumes]
+        for mount in mounts:
+            if list(map(attrgetter('internal'), mounts)).count(mount.internal) > 1:
+                duplicate_mounts.append(mount.repr())
+
+        if duplicate_mounts:
+            raise ConfigurationError("Duplicate mount points: [%s]" % (
+                ', '.join(duplicate_mounts)))
+
         service_dict['volumes'] = finalized_volumes
 
     return service_dict
@@ -881,6 +895,7 @@ def finalize_service(service_config, service_names, version, environment, compat
     normalize_build(service_dict, service_config.working_dir, environment)
 
     if compatibility:
+        service_dict = translate_credential_spec_to_security_opt(service_dict)
         service_dict, ignored_keys = translate_deploy_keys_to_container_config(
             service_dict
         )
@@ -915,6 +930,25 @@ def convert_restart_policy(name):
         }[name]
     except KeyError:
         raise ConfigurationError('Invalid restart policy "{}"'.format(name))
+
+
+def convert_credential_spec_to_security_opt(credential_spec):
+    if 'file' in credential_spec:
+        return 'file://{file}'.format(file=credential_spec['file'])
+    return 'registry://{registry}'.format(registry=credential_spec['registry'])
+
+
+def translate_credential_spec_to_security_opt(service_dict):
+    result = []
+
+    if 'credential_spec' in service_dict:
+        spec = convert_credential_spec_to_security_opt(service_dict['credential_spec'])
+        result.append('credentialspec={spec}'.format(spec=spec))
+
+    if result:
+        service_dict['security_opt'] = result
+
+    return service_dict
 
 
 def translate_deploy_keys_to_container_config(service_dict):
@@ -1039,15 +1073,16 @@ def merge_service_dicts(base, override, version):
     md.merge_mapping('environment', parse_environment)
     md.merge_mapping('labels', parse_labels)
     md.merge_mapping('ulimits', parse_flat_dict)
-    md.merge_mapping('networks', parse_networks)
     md.merge_mapping('sysctls', parse_sysctls)
     md.merge_mapping('depends_on', parse_depends_on)
+    md.merge_mapping('storage_opt', parse_flat_dict)
     md.merge_sequence('links', ServiceLink.parse)
     md.merge_sequence('secrets', types.ServiceSecret.parse)
     md.merge_sequence('configs', types.ServiceConfig.parse)
     md.merge_sequence('security_opt', types.SecurityOpt.parse)
     md.merge_mapping('extra_hosts', parse_extra_hosts)
 
+    md.merge_field('networks', merge_networks, default={})
     for field in ['volumes', 'devices']:
         md.merge_field(field, merge_path_mappings)
 
@@ -1150,6 +1185,22 @@ def merge_deploy(base, override):
         md['placement'] = dict(placement_md)
 
     return dict(md)
+
+
+def merge_networks(base, override):
+    merged_networks = {}
+    all_network_names = set(base) | set(override)
+    base = {k: {} for k in base} if isinstance(base, list) else base
+    override = {k: {} for k in override} if isinstance(override, list) else override
+    for network_name in all_network_names:
+        md = MergeDict(base.get(network_name) or {}, override.get(network_name) or {})
+        md.merge_field('aliases', merge_unique_items_lists, [])
+        md.merge_field('link_local_ips', merge_unique_items_lists, [])
+        md.merge_scalar('priority')
+        md.merge_scalar('ipv4_address')
+        md.merge_scalar('ipv6_address')
+        merged_networks[network_name] = dict(md)
+    return merged_networks
 
 
 def merge_reservations(base, override):
@@ -1281,7 +1332,7 @@ def resolve_volume_paths(working_dir, service_dict):
 
 def resolve_volume_path(working_dir, volume):
     if isinstance(volume, dict):
-        if volume.get('source', '').startswith('.') and volume['type'] == 'bind':
+        if volume.get('source', '').startswith(('.', '~')) and volume['type'] == 'bind':
             volume['source'] = expand_path(working_dir, volume['source'])
         return volume
 

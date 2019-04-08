@@ -5,6 +5,7 @@ import docker
 import pytest
 from docker.constants import DEFAULT_DOCKER_API_VERSION
 from docker.errors import APIError
+from docker.errors import ImageNotFound
 from docker.errors import NotFound
 
 from .. import mock
@@ -21,6 +22,7 @@ from compose.const import LABEL_ONE_OFF
 from compose.const import LABEL_PROJECT
 from compose.const import LABEL_SERVICE
 from compose.const import SECRETS_PATH
+from compose.const import WINDOWS_LONGPATH_PREFIX
 from compose.container import Container
 from compose.errors import OperationFailedError
 from compose.parallel import ParallelStreamWriter
@@ -38,6 +40,7 @@ from compose.service import NeedsBuildError
 from compose.service import NetworkMode
 from compose.service import NoSuchImageError
 from compose.service import parse_repository_tag
+from compose.service import rewrite_build_path
 from compose.service import Service
 from compose.service import ServiceNetworkMode
 from compose.service import warn_on_masked_volume
@@ -317,13 +320,14 @@ class ServiceTest(unittest.TestCase):
         self.mock_client.inspect_image.return_value = {'Id': 'abcd'}
         prev_container = mock.Mock(
             id='ababab',
-            image_config={'ContainerConfig': {}})
+            image_config={'ContainerConfig': {}}
+        )
+        prev_container.full_slug = 'abcdefff1234'
         prev_container.get.return_value = None
 
         opts = service._get_container_create_options(
-            {},
-            1,
-            previous_container=prev_container)
+            {}, 1, previous_container=prev_container
+        )
 
         assert service.options['labels'] == labels
         assert service.options['environment'] == environment
@@ -355,11 +359,13 @@ class ServiceTest(unittest.TestCase):
             }.get(key, None)
 
         prev_container.get.side_effect = container_get
+        prev_container.full_slug = 'abcdefff1234'
 
         opts = service._get_container_create_options(
             {},
             1,
-            previous_container=prev_container)
+            previous_container=prev_container
+        )
 
         assert opts['environment'] == ['affinity:container==ababab']
 
@@ -370,6 +376,7 @@ class ServiceTest(unittest.TestCase):
             id='ababab',
             image_config={'ContainerConfig': {}})
         prev_container.get.return_value = None
+        prev_container.full_slug = 'abcdefff1234'
 
         opts = service._get_container_create_options(
             {},
@@ -386,7 +393,7 @@ class ServiceTest(unittest.TestCase):
 
     @mock.patch('compose.service.Container', autospec=True)
     def test_get_container(self, mock_container_class):
-        container_dict = dict(Name='default_foo_2')
+        container_dict = dict(Name='default_foo_2_bdfa3ed91e2c')
         self.mock_client.containers.return_value = [container_dict]
         service = Service('foo', image='foo', client=self.mock_client)
 
@@ -463,6 +470,7 @@ class ServiceTest(unittest.TestCase):
     @mock.patch('compose.service.Container', autospec=True)
     def test_recreate_container(self, _):
         mock_container = mock.create_autospec(Container)
+        mock_container.full_slug = 'abcdefff1234'
         service = Service('foo', client=self.mock_client, image='someimage')
         service.image = lambda: {'Id': 'abc123'}
         new_container = service.recreate_container(mock_container)
@@ -476,6 +484,7 @@ class ServiceTest(unittest.TestCase):
     @mock.patch('compose.service.Container', autospec=True)
     def test_recreate_container_with_timeout(self, _):
         mock_container = mock.create_autospec(Container)
+        mock_container.full_slug = 'abcdefff1234'
         self.mock_client.inspect_image.return_value = {'Id': 'abc123'}
         service = Service('foo', client=self.mock_client, image='someimage')
         service.recreate_container(mock_container, timeout=1)
@@ -701,17 +710,19 @@ class ServiceTest(unittest.TestCase):
             image='example.com/foo',
             client=self.mock_client,
             network_mode=NetworkMode('bridge'),
-            networks={'bridge': {}},
+            networks={'bridge': {}, 'net2': {}},
             links=[(Service('one', client=self.mock_client), 'one')],
-            volumes_from=[VolumeFromSpec(Service('two', client=self.mock_client), 'rw', 'service')]
+            volumes_from=[VolumeFromSpec(Service('two', client=self.mock_client), 'rw', 'service')],
+            volumes=[VolumeSpec('/ext', '/int', 'ro')],
+            build={'context': 'some/random/path'},
         )
         config_hash = service.config_hash
 
         for api_version in set(API_VERSIONS.values()):
             self.mock_client.api_version = api_version
-            assert service._get_container_create_options({}, 1)['labels'][LABEL_CONFIG_HASH] == (
-                config_hash
-            )
+            assert service._get_container_create_options(
+                {}, 1
+            )['labels'][LABEL_CONFIG_HASH] == config_hash
 
     def test_remove_image_none(self):
         web = Service('web', image='example', client=self.mock_client)
@@ -744,6 +755,13 @@ class ServiceTest(unittest.TestCase):
             assert not web.remove_image(ImageType.all)
         mock_log.error.assert_called_once_with(
             "Failed to remove image for service %s: %s", web.name, error)
+
+    def test_remove_non_existing_image(self):
+        self.mock_client.remove_image.side_effect = ImageNotFound('image not found')
+        web = Service('web', image='example', client=self.mock_client)
+        with mock.patch('compose.service.log', autospec=True) as mock_log:
+            assert not web.remove_image(ImageType.all)
+        mock_log.warning.assert_called_once_with("Image %s not found.", web.image_name)
 
     def test_specifies_host_port_with_no_ports(self):
         service = Service(
@@ -1028,6 +1046,23 @@ class ServiceTest(unittest.TestCase):
         assert 'binds' in override_opts
         assert len(override_opts['binds']) == 1
         assert override_opts['binds'][0] == 'vol:/data:rw'
+
+    def test_volumes_order_is_preserved(self):
+        service = Service('foo', client=self.mock_client)
+        volumes = [
+            VolumeSpec.parse(cfg) for cfg in [
+                '/v{0}:/v{0}:rw'.format(i) for i in range(6)
+            ]
+        ]
+        ctnr_opts, override_opts = service._build_container_volume_options(
+            previous_container=None,
+            container_options={
+                'volumes': volumes,
+                'environment': {},
+            },
+            override_options={},
+        )
+        assert override_opts['binds'] == [vol.repr() for vol in volumes]
 
 
 class TestServiceNetwork(unittest.TestCase):
@@ -1461,3 +1496,28 @@ class ServiceSecretTest(unittest.TestCase):
 
         assert volumes[0].source == secret1['file']
         assert volumes[0].target == '{}/{}'.format(SECRETS_PATH, secret1['secret'].source)
+
+
+class RewriteBuildPathTest(unittest.TestCase):
+    @mock.patch('compose.service.IS_WINDOWS_PLATFORM', True)
+    def test_rewrite_url_no_prefix(self):
+        urls = [
+            'http://test.com',
+            'https://test.com',
+            'git://test.com',
+            'github.com/test/test',
+            'git@test.com',
+        ]
+        for u in urls:
+            assert rewrite_build_path(u) == u
+
+    @mock.patch('compose.service.IS_WINDOWS_PLATFORM', True)
+    def test_rewrite_windows_path(self):
+        assert rewrite_build_path('C:\\context') == WINDOWS_LONGPATH_PREFIX + 'C:\\context'
+        assert rewrite_build_path(
+            rewrite_build_path('C:\\context')
+        ) == rewrite_build_path('C:\\context')
+
+    @mock.patch('compose.service.IS_WINDOWS_PLATFORM', False)
+    def test_rewrite_unix_path(self):
+        assert rewrite_build_path('/context') == '/context'
